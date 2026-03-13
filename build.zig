@@ -96,6 +96,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    installSqliteZstd(b, mod, target, exe);
+
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden
@@ -166,4 +168,41 @@ pub fn build(b: *std.Build) void {
     //
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
+}
+
+fn installSqliteZstd(
+    b: *std.Build,
+    mod: *std.Build.Module,
+    target: std.Build.ResolvedTarget,
+    exe: *std.Build.Step.Compile,
+) void {
+    const repo_url = "https://github.com/phiresky/sqlite-zstd";
+    const build_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-zstd" });
+    const cargo_toml = b.pathJoin(&.{ build_path, "Cargo.toml" });
+
+    const check_and_clone = b.addSystemCommand(&.{
+        "sh", "-c",
+        b.fmt("if [ ! -d {s} ]; then git clone --depth 1 {s} {s}; fi", .{
+            build_path, repo_url, build_path,
+        }),
+    });
+    check_and_clone.has_side_effects = true;
+
+    const patch_cmd = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", cargo_toml });
+    patch_cmd.step.dependOn(&check_and_clone.step);
+
+    const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml });
+    cargo_build.step.dependOn(&patch_cmd.step);
+
+    exe.step.dependOn(&cargo_build.step);
+
+    const lib_dir = b.pathJoin(&.{ build_path, "target", "release" });
+    mod.addLibraryPath(.{ .cwd_relative = lib_dir });
+    mod.linkSystemLibrary("sqlite_zstd", .{ .preferred_link_mode = .static });
+
+    if (target.result.os.tag != .windows) {
+        mod.linkSystemLibrary("pthread", .{});
+        mod.linkSystemLibrary("dl", .{});
+        mod.linkSystemLibrary("m", .{});
+    }
 }
