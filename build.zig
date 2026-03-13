@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) void {
     opts.addOption([]const u8, "program_name", "clogite");
 
     const sqlite = b.dependency("sqlite", .{ .target = target, .optimize = optimize, .fts5 = true });
+    const vaxis = b.dependency("vaxis", .{ .target = target, .optimize = optimize });
 
     // This creates a module, which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
@@ -47,6 +48,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "sqlite", .module = sqlite.module("sqlite") },
+            .{ .name = "vaxis", .module = vaxis.module("vaxis" ) },
         },
     });
 
