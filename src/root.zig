@@ -27,7 +27,25 @@ pub inline fn getDbPath(alloc: std.mem.Allocator) [:0]const u8 {
     return path;
 }
 
-// TODO: Validate the contents of the database
+pub inline fn checkDbSize(db_path: ?[:0]const u8) bool {
+    const alloc = std.heap.smp_allocator;
+
+    const path = db_path orelse getDbPath(alloc);
+    defer if (db_path == null) alloc.free(path);
+
+    const fp = std.fs.openFileAbsolute(path, .{}) catch |e| {
+        std.log.err("Failed to open database at {s} to verify size: {t}", .{path, e});
+        return false;
+    };
+    defer fp.close();
+
+    const stat = fp.stat() catch |e| {
+        std.log.err("Failed to stat file at {s}: {t}", .{path, e});
+        return false;
+    };
+    return stat.size > 0;
+}
+
 pub inline fn checkDbExists(db_path: ?[:0]const u8) bool {
     const alloc = std.heap.smp_allocator;
 
@@ -99,7 +117,7 @@ fn createTriggers(db: *sqlite.Db) !void {
 pub fn initDb() !void {
     const alloc = std.heap.smp_allocator;
     const db_path = getDbPath(alloc);
-    if (checkDbExists(db_path)) {
+    if (checkDbExists(db_path) and checkDbSize(db_path)) {
         return;
     }
 
