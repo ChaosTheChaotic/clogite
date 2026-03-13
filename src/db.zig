@@ -25,13 +25,13 @@ pub inline fn checkDbSize(db_path: ?[:0]const u8) bool {
     defer if (db_path == null) alloc.free(path);
 
     const fp = std.fs.openFileAbsolute(path, .{}) catch |e| {
-        std.log.err("Failed to open database at {s} to verify size: {t}", .{path, e});
+        std.log.err("Failed to open database at {s} to verify size: {t}", .{ path, e });
         return false;
     };
     defer fp.close();
 
     const stat = fp.stat() catch |e| {
-        std.log.err("Failed to stat file at {s}: {t}", .{path, e});
+        std.log.err("Failed to stat file at {s}: {t}", .{ path, e });
         return false;
     };
     return stat.size > 0;

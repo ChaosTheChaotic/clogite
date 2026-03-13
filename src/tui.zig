@@ -47,7 +47,7 @@ pub fn initTui() !void {
             else => {},
         }
         const win = vx.window();
-        
+
         win.clear();
 
         const search = win.child(.{
