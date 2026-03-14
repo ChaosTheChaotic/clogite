@@ -191,7 +191,7 @@ fn installSqliteZstd(
     const patch_cmd = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", cargo_toml });
     patch_cmd.step.dependOn(&check_and_clone.step);
 
-    const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml });
+    const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml, "--features", "build_extension" });
     cargo_build.step.dependOn(&patch_cmd.step);
 
     exe.step.dependOn(&cargo_build.step);
@@ -204,5 +204,6 @@ fn installSqliteZstd(
         mod.linkSystemLibrary("pthread", .{});
         mod.linkSystemLibrary("dl", .{});
         mod.linkSystemLibrary("m", .{});
+        mod.linkSystemLibrary("gcc_s", .{});
     }
 }

@@ -2,6 +2,14 @@ const std = @import("std");
 const sqlite = @import("sqlite");
 const program_info = @import("program_info");
 
+const c = sqlite.c;
+
+extern fn sqlite3_sqlitezstd_init(
+    db: ?*c.sqlite3,
+    pz_err_msg: ?*?[*c]u8,
+    p_api: ?*c.sqlite3_api_routines,
+) callconv(.c) c_int;
+
 pub inline fn getDbPath(alloc: std.mem.Allocator) [:0]const u8 {
     const data_dir = std.fs.getAppDataDir(alloc, program_info.program_name) catch |e| blk: {
         std.log.err("Error getting app data path: {}", .{e});
@@ -116,6 +124,12 @@ pub fn initDb() !void {
             std.log.err("Failed to create directory {s}: {}", .{ dir, e });
             return e;
         };
+    }
+    
+    const rc = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
+    if (rc != c.SQLITE_OK) {
+        std.log.err("Failed to register sqlite-zstd auto-extension. SQLite error code: {d}", .{rc});
+        return error.ExtensionRegistrationFailed;
     }
 
     var db = try sqlite.Db.init(.{
