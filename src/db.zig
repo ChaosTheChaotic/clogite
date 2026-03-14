@@ -59,7 +59,8 @@ fn createCommandsTable(db: *sqlite.Db) !void {
     try db.exec(
         \\CREATE TABLE IF NOT EXISTS commands (
         \\    id INTEGER PRIMARY KEY,
-        \\    content TEXT UNIQUE NOT NULL,
+        \\    content TEXT NOT NULL, -- UNIQUE removed so it can be compressed
+        \\    content_hash BLOB UNIQUE NOT NULL, -- Used for uniqueness
         \\    last_run_at INTEGER NOT NULL,
         \\    last_exit_code INTEGER NOT NULL,
         \\    last_duration_ms INTEGER NOT NULL,
@@ -112,6 +113,25 @@ fn createTriggers(db: *sqlite.Db) !void {
     , .{}, .{});
 }
 
+fn applyPragmas(db: *sqlite.Db) !void {
+    _ = try db.pragma(void, .{}, "journal_mode", "WAL");
+    _ = try db.pragma(void, .{}, "synchronous", "NORMAL");
+    _ = try db.pragma(void, .{}, "temp_store", "MEMORY");
+    _ = try db.pragma(void, .{}, "busy_timeout", "5000");
+}
+
+fn enableZstdCompression(db: *sqlite.Db) !void {
+    var transp_stmt = try db.prepare(
+        \\SELECT zstd_enable_transparent('{"table": "commands", "column": "content", "compression_level": 19, "dict_chooser": "''a''"}');
+    );
+    defer transp_stmt.deinit();
+
+    var incmnt_stmt = try db.prepare("SELECT zstd_incremental_maintenance(null, 1);");
+    defer incmnt_stmt.deinit();
+
+    try db.exec("VACUUM;", .{}, .{});
+}
+
 pub fn initDb() !void {
     const alloc = std.heap.smp_allocator;
     const db_path = getDbPath(alloc);
@@ -125,7 +145,7 @@ pub fn initDb() !void {
             return e;
         };
     }
-    
+
     const rc = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
     if (rc != c.SQLITE_OK) {
         std.log.err("Failed to register sqlite-zstd auto-extension. SQLite error code: {d}", .{rc});
@@ -137,6 +157,7 @@ pub fn initDb() !void {
         .open_flags = .{ .create = true, .write = true },
         .threading_mode = .MultiThread,
     });
+    try applyPragmas(&db);
     try db.exec("BEGIN TRANSACTION;", .{}, .{});
 
     try createCommandsTable(&db);
@@ -146,4 +167,6 @@ pub fn initDb() !void {
     try createTriggers(&db);
 
     try db.exec("COMMIT;", .{}, .{});
+
+    try enableZstdCompression(&db);
 }
