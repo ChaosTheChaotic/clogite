@@ -61,6 +61,15 @@ pub fn initTui(db: *sqlite.Db) !void {
             },
         });
 
+        _ = win.child(.{
+            .x_off = 0,
+            .y_off = 0,
+            .height = win.height - 3,
+            .border = .{
+                .where = .all,
+            },
+        });
+
         text_input.draw(search);
         try vx.render(tty.writer());
     }
