@@ -45,9 +45,14 @@ pub fn main() !void {
     defer if (db) |*d| d.deinit();
     var args = std.process.args();
     _ = args.next(); // Skip the program path
+    if (std.os.argv.len <= 1) {
+        try print_help();
+        return;
+    }
     while (args.next()) |arg| {
         switch (SubCmd.parse(arg) orelse {
             std.log.warn("Ignoring unknown argument: {s}\n", .{arg});
+            try print_help();
             continue;
         }) {
             .help => {
