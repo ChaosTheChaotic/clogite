@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
 
     const opts = b.addOptions();
     opts.addOption([]const u8, "program_name", "clogite");
+    opts.addOption(std.SemanticVersion, "program_version", std.SemanticVersion.parse("0.0.0") catch unreachable);
 
     const sqlite = b.dependency("sqlite", .{ .target = target, .optimize = optimize, .fts5 = true });
     const vaxis = b.dependency("vaxis", .{ .target = target, .optimize = optimize });

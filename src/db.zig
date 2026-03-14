@@ -1,5 +1,5 @@
 const std = @import("std");
-const sqlite = @import("sqlite");
+pub const sqlite = @import("sqlite");
 const program_info = @import("program_info");
 
 const c = sqlite.c;
@@ -132,11 +132,33 @@ fn enableZstdCompression(db: *sqlite.Db) !void {
     try db.exec("VACUUM;", .{}, .{});
 }
 
-pub fn initDb() !void {
+pub fn maintenance(db: *sqlite.Db) !void {
+    var incmt_stmt = try db.prepare("SELECT zstd_incremental_maintenance(null, 1);");
+    defer incmt_stmt.deinit();
+    try db.exec("VACUUM;", .{}, .{});
+
+    try db.exec("INSERT INTO commands_fts(commands_fts) VALUES('optimize');", .{}, .{});
+}
+
+pub fn initDb() !sqlite.Db {
     const alloc = std.heap.smp_allocator;
     const db_path = getDbPath(alloc);
+
+    const rc = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
+    if (rc != c.SQLITE_OK) {
+        std.log.err("Failed to register sqlite-zstd auto-extension. SQLite error code: {d}", .{rc});
+        return error.ExtensionRegistrationFailed;
+    }
+
     if (checkDbExists(db_path) and checkDbSize(db_path)) {
-        return;
+        var db = try sqlite.Db.init(.{
+            .mode = .{ .File = db_path },
+            .open_flags = .{ .write = true },
+            .threading_mode = .MultiThread,
+        });
+        try applyPragmas(&db);
+        try maintenance(&db);
+        return db;
     }
 
     if (std.fs.path.dirname(db_path)) |dir| {
@@ -144,12 +166,6 @@ pub fn initDb() !void {
             std.log.err("Failed to create directory {s}: {}", .{ dir, e });
             return e;
         };
-    }
-
-    const rc = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
-    if (rc != c.SQLITE_OK) {
-        std.log.err("Failed to register sqlite-zstd auto-extension. SQLite error code: {d}", .{rc});
-        return error.ExtensionRegistrationFailed;
     }
 
     var db = try sqlite.Db.init(.{
@@ -169,4 +185,6 @@ pub fn initDb() !void {
     try db.exec("COMMIT;", .{}, .{});
 
     try enableZstdCompression(&db);
+    try maintenance(&db);
+    return db;
 }

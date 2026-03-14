@@ -1,5 +1,7 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
+const sqlite = @import("sqlite");
+const db_mod = @import("db.zig");
 
 const Event = union(enum) {
     key_press: vaxis.Key,
@@ -7,7 +9,7 @@ const Event = union(enum) {
     focus_in,
 };
 
-pub fn initTui() !void {
+pub fn initTui(db: *sqlite.Db) !void {
     const alloc = std.heap.smp_allocator;
 
     var buf: [1024]u8 = undefined;
@@ -62,4 +64,5 @@ pub fn initTui() !void {
         text_input.draw(search);
         try vx.render(tty.writer());
     }
+    try db_mod.maintenance(db);
 }
