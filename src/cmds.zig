@@ -107,3 +107,29 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
         .content_hash = &hash,
     });
 }
+
+pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool) ![]Cmd {
+    if (term.len == 0) return getCommands(alloc, db, null);
+
+    if (case_sensitive) {
+        var stmt = try db.prepare(
+            \\SELECT id, content, last_run_at, last_exit_code, 
+            \\last_duration_ms, run_count, total_duration_ms 
+            \\FROM commands WHERE INSTR(content, ?) > 0 
+            \\ORDER BY last_run_at DESC
+        );
+        defer stmt.deinit();
+        return try stmt.all(Cmd, alloc, .{}, .{ term });
+    } else {
+        var stmt = try db.prepare(
+            \\SELECT id, content, last_run_at, last_exit_code, 
+            \\last_duration_ms, run_count, total_duration_ms 
+            \\FROM commands WHERE content LIKE ? 
+            \\ORDER BY last_run_at DESC
+        );
+        defer stmt.deinit();
+        const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{term});
+        defer alloc.free(like_term);
+        return try stmt.all(Cmd, alloc, .{}, .{ like_term });
+    }
+}

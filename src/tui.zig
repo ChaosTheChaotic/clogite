@@ -36,12 +36,14 @@ pub fn initTui(db: *sqlite.Db) !void {
 
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
-    const history = try cmds.getCommands(arena.allocator(), db, null);
+    var history = try cmds.getCommands(arena.allocator(), db, null);
 
     var selected_idx: i64 = 0;
 
     while (true) {
         const event = loop.nextEvent();
+
+        _ = arena.reset(.retain_capacity);
 
         switch (event) {
             .key_press => |key| {
@@ -59,10 +61,18 @@ pub fn initTui(db: *sqlite.Db) !void {
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
         }
 
+        const search = text_input.sliceToCursor(&buf);
+
+        if (search.len > 0) {
+            history = try cmds.searchCommands(alloc, db, search, std.mem.startsWith(u8, search, "\\c"));
+        } else {
+            history = try cmds.getCommands(alloc, db, null);
+        }
+
         const win = vx.window();
         win.clear();
 
-        const search = win.child(.{
+        const search_win = win.child(.{
             .x_off = 0,
             .y_off = win.height - 3,
             .height = 3,
@@ -105,7 +115,7 @@ pub fn initTui(db: *sqlite.Db) !void {
             y -= 1;
         }
 
-        text_input.draw(search);
+        text_input.draw(search_win);
         try vx.render(tty.writer());
     }
     try db_mod.maintenance(db);
