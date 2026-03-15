@@ -47,36 +47,6 @@ pub fn initTui(db: *sqlite.Db) !void {
         const win = vx.window();
         const list_height = win.height - 3; 
 
-        const event = loop.nextEvent();
-
-        switch (event) {
-            .key_press => |key| {
-                if (key.matches('c', .{ .ctrl = true })) {
-                    break;
-                } else if (key.matches(vaxis.Key.up, .{})) {
-                    if (history.len > 0 and selected_idx < history.len - 1) {
-                        selected_idx += 1;
-                        if (selected_idx >= scroll_offset + list_height) {
-                            scroll_offset += 1;
-                        }
-                    }
-                } else if (key.matches(vaxis.Key.down, .{})) {
-                    if (selected_idx > 0) {
-                        selected_idx -= 1;
-                        if (selected_idx < scroll_offset) {
-                            scroll_offset -= 1;
-                        }
-                    } else {
-                        break; 
-                    }
-                } else {
-                    try text_input.update(.{ .key_press = key });
-                    selected_idx = 0;
-                    scroll_offset = 0;
-                }
-            },
-            .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
-        }
 
         var search = text_input.sliceToCursor(&buf);
         if (search.len > 0) {
@@ -133,6 +103,37 @@ pub fn initTui(db: *sqlite.Db) !void {
 
         text_input.draw(search_win);
         try vx.render(tty.writer());
+
+        const event = loop.nextEvent();
+
+        switch (event) {
+            .key_press => |key| {
+                if (key.matches('c', .{ .ctrl = true })) {
+                    break;
+                } else if (key.matches(vaxis.Key.up, .{})) {
+                    if (history.len > 0 and selected_idx < history.len - 1) {
+                        selected_idx += 1;
+                        if (selected_idx >= scroll_offset + list_height) {
+                            scroll_offset += 1;
+                        }
+                    }
+                } else if (key.matches(vaxis.Key.down, .{})) {
+                    if (selected_idx > 0) {
+                        selected_idx -= 1;
+                        if (selected_idx < scroll_offset) {
+                            scroll_offset -= 1;
+                        }
+                    } else {
+                        break; 
+                    }
+                } else {
+                    try text_input.update(.{ .key_press = key });
+                    selected_idx = 0;
+                    scroll_offset = 0;
+                }
+            },
+            .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
+        }
     }
     try db_mod.maintenance(db);
 }
