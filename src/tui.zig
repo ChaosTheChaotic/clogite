@@ -38,6 +38,8 @@ pub fn initTui(db: *sqlite.Db) !void {
     defer arena.deinit();
     const history = try cmds.getCommands(arena.allocator(), db, null);
 
+    var selected_idx: i64 = 0;
+
     while (true) {
         const event = loop.nextEvent();
 
@@ -45,6 +47,11 @@ pub fn initTui(db: *sqlite.Db) !void {
             .key_press => |key| {
                 if (key.matches('c', .{ .ctrl = true })) {
                     break;
+                } else if (key.matches(vaxis.Key.up, .{})) {
+                    if (history.len > 0 and selected_idx < @as(i64, @intCast(history.len)) - 1) selected_idx += 1;
+                } else if (key.matches(vaxis.Key.down, .{})) {
+                    if (selected_idx <= 0) break;
+                    selected_idx -= 1;
                 } else {
                     try text_input.update(.{ .key_press = key });
                 }
@@ -76,7 +83,7 @@ pub fn initTui(db: *sqlite.Db) !void {
         const now = std.time.timestamp();
         var y: i32 = @as(i32, list_win.height) - 1;
 
-        for (history) |cmd| {
+        for (history, 0..) |cmd, i| {
             if (y < 0) break;
 
             var ago_buf: [32]u8 = undefined;
@@ -96,7 +103,9 @@ pub fn initTui(db: *sqlite.Db) !void {
 
             const line = std.fmt.bufPrint(&line_buf, "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content }) catch "";
 
-            _ = list_win.print(&.{ .{ .text = line } }, .{ 
+            const style: vaxis.Style = if (selected_idx >= 0 and i == @as(usize, @intCast(selected_idx))) .{ .reverse = true } else .{};
+
+            _ = list_win.print(&.{ .{ .text = line, .style = style } }, .{ 
                 .row_offset = @intCast(y), 
                 .col_offset = 0 
             });
