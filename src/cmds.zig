@@ -76,24 +76,17 @@ pub fn removeCommand(db: *sqlite.Db, raw_cmd: []const u8) !void {
     try db_mod.maintenance(db);
 }
 
-pub fn getCommands(allocator: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]Cmd {
-    var query = std.ArrayList(u8).init(allocator);
-    defer query.deinit();
-
-    try query.appendSlice(
+pub fn getCommands(alloc: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]Cmd {
+    var stmt = try db.prepare(
         \\SELECT id, content, last_run_at, last_exit_code, 
         \\last_duration_ms, run_count, total_duration_ms 
-        \\FROM commands ORDER BY last_run_at DESC
+        \\FROM commands ORDER BY last_run_at DESC LIMIT ?
     );
-
-    if (limit) |l| {
-        try std.fmt.format(query.writer(), " LIMIT {d}", .{l});
-    }
-
-    var stmt = try db.prepare(query.items);
     defer stmt.deinit();
 
-    return try stmt.all(Cmd, allocator, .{}, .{});
+    const limit_val: i64 = if (limit) |l| @as(i64, @intCast(l)) else -1;
+
+    return try stmt.all(Cmd, alloc, .{}, .{ limit_val });
 }
 
 pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []const u8) !?Cmd {

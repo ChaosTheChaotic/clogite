@@ -2,6 +2,7 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const sqlite = @import("sqlite");
 const db_mod = @import("db.zig");
+const cmds = @import("cmds.zig");
 
 const Event = union(enum) {
     key_press: vaxis.Key,
@@ -23,9 +24,9 @@ pub fn initTui(db: *sqlite.Db) !void {
         .tty = &tty,
         .vaxis = &vx,
     };
+
     try loop.init();
 
-    // Starts read loop, puts terminal in raw mode and reads user input
     try loop.start();
     defer loop.stop();
 
@@ -33,6 +34,10 @@ pub fn initTui(db: *sqlite.Db) !void {
 
     var text_input = vaxis.widgets.TextInput.init(alloc);
     defer text_input.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const history = try cmds.getCommands(arena.allocator(), db, null);
 
     while (true) {
         const event = loop.nextEvent();
@@ -48,8 +53,8 @@ pub fn initTui(db: *sqlite.Db) !void {
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
             else => {},
         }
+        
         const win = vx.window();
-
         win.clear();
 
         const search = win.child(.{
@@ -61,7 +66,7 @@ pub fn initTui(db: *sqlite.Db) !void {
             },
         });
 
-        _ = win.child(.{
+        const list_win = win.child(.{
             .x_off = 0,
             .y_off = 0,
             .height = win.height - 3,
@@ -69,6 +74,33 @@ pub fn initTui(db: *sqlite.Db) !void {
                 .where = .all,
             },
         });
+
+        const now = std.time.timestamp();
+        var y: u16 = 0;
+
+        for (history) |cmd| {
+            if (y >= list_win.height) break;
+
+            var ago_buf: [32]u8 = undefined;
+            var dur_buf: [32]u8 = undefined;
+            var line_buf: [512]u8 = undefined;
+
+            const diff = now - cmd.last_run_at;
+            const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now"
+                else if (diff < 3600) std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) catch ""
+                else if (diff < 86400) std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) catch ""
+                else std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)}) catch "";
+
+            const dur_str = if (cmd.last_duration_ms < 1000)
+                std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
+            else
+                std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
+
+            const line = std.fmt.bufPrint(&line_buf, "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content }) catch "";
+
+            _ = list_win.print(&.{ .{ .text = line } }, .{ .row_offset = y, .col_offset = 0 });
+            y += 1;
+        }
 
         text_input.draw(search);
         try vx.render(tty.writer());
