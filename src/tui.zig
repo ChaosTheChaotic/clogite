@@ -45,8 +45,7 @@ pub fn initTui(db: *sqlite.Db) !void {
         _ = arena.reset(.retain_capacity);
 
         const win = vx.window();
-        const list_height = win.height - 3; 
-
+        const list_height = win.height - 3;
 
         var search = text_input.sliceToCursor(&buf);
         if (search.len > 0) {
@@ -90,7 +89,7 @@ pub fn initTui(db: *sqlite.Db) !void {
 
             const dur_str = if (cmd.last_duration_ms < 1000)
                 std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
-                else
+            else
                 std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
 
             const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content });
@@ -124,7 +123,7 @@ pub fn initTui(db: *sqlite.Db) !void {
                             scroll_offset -= 1;
                         }
                     } else {
-                        break; 
+                        break;
                     }
                 } else {
                     try text_input.update(.{ .key_press = key });

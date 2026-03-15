@@ -119,7 +119,7 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
             \\ORDER BY last_run_at DESC
         );
         defer stmt.deinit();
-        return try stmt.all(Cmd, alloc, .{}, .{ term });
+        return try stmt.all(Cmd, alloc, .{}, .{term});
     } else {
         var stmt = try db.prepare(
             \\SELECT id, content, last_run_at, last_exit_code, 
@@ -130,6 +130,6 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
         defer stmt.deinit();
         const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{term});
         defer alloc.free(like_term);
-        return try stmt.all(Cmd, alloc, .{}, .{ like_term });
+        return try stmt.all(Cmd, alloc, .{}, .{like_term});
     }
 }
