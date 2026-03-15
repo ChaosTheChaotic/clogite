@@ -39,67 +39,79 @@ pub fn initTui(db: *sqlite.Db) !void {
     var history = try cmds.getCommands(arena.allocator(), db, null);
 
     var selected_idx: i64 = 0;
+    var scroll_offset: usize = 0;
 
     while (true) {
-        const event = loop.nextEvent();
-
         _ = arena.reset(.retain_capacity);
+
+        const win = vx.window();
+        const list_height = win.height - 3; 
+
+        const event = loop.nextEvent();
 
         switch (event) {
             .key_press => |key| {
                 if (key.matches('c', .{ .ctrl = true })) {
                     break;
                 } else if (key.matches(vaxis.Key.up, .{})) {
-                    if (history.len > 0 and selected_idx < @as(i64, @intCast(history.len)) - 1) selected_idx += 1;
+                    if (history.len > 0 and selected_idx < history.len - 1) {
+                        selected_idx += 1;
+                        if (selected_idx >= scroll_offset + list_height) {
+                            scroll_offset += 1;
+                        }
+                    }
                 } else if (key.matches(vaxis.Key.down, .{})) {
-                    if (selected_idx <= 0) break;
-                    selected_idx -= 1;
+                    if (selected_idx > 0) {
+                        selected_idx -= 1;
+                        if (selected_idx < scroll_offset) {
+                            scroll_offset -= 1;
+                        }
+                    } else {
+                        break; 
+                    }
                 } else {
                     try text_input.update(.{ .key_press = key });
+                    selected_idx = 0;
+                    scroll_offset = 0;
                 }
             },
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
         }
 
         var search = text_input.sliceToCursor(&buf);
-
         if (search.len > 0) {
-            const caseInsensitive: bool = std.mem.startsWith(u8, search, "\\c");
-            if (caseInsensitive) {
-                search = search[2..];
-            }
-            history = try cmds.searchCommands(alloc, db, search, caseInsensitive);
+            const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
+            const actual_search = if (caseInsensitive) search[2..] else search;
+            history = try cmds.searchCommands(alloc, db, actual_search, caseInsensitive);
         } else {
             history = try cmds.getCommands(alloc, db, null);
         }
 
-        const win = vx.window();
         win.clear();
-
         const search_win = win.child(.{
             .x_off = 0,
             .y_off = win.height - 3,
             .height = 3,
-            .border = .{
-                .where = .all,
-            },
+            .border = .{ .where = .all },
         });
 
         const list_win = win.child(.{
             .x_off = 0,
             .y_off = 0,
-            .height = win.height - 3,
-            .border = .{
-                .where = .all,
-            },
+            .height = list_height,
+            .border = .{ .where = .all },
         });
 
         const now = std.time.timestamp();
         var y: i32 = @as(i32, list_win.height) - 1;
 
-        for (history, 0..) |cmd, i| {
+        const end_idx = @min(history.len, scroll_offset + list_win.height);
+        const visible_history = history[scroll_offset..end_idx];
+
+        for (visible_history, 0..) |cmd, i| {
             if (y < 0) break;
 
+            const current_item_idx = scroll_offset + i;
             var ago_buf: [32]u8 = undefined;
             var dur_buf: [32]u8 = undefined;
 
@@ -108,12 +120,12 @@ pub fn initTui(db: *sqlite.Db) !void {
 
             const dur_str = if (cmd.last_duration_ms < 1000)
                 std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
-            else
+                else
                 std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
 
             const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content });
 
-            const style: vaxis.Style = if (selected_idx >= 0 and i == @as(usize, @intCast(selected_idx))) .{ .reverse = true } else .{};
+            const style: vaxis.Style = if (current_item_idx == selected_idx) .{ .reverse = true } else .{};
 
             _ = list_win.print(&.{.{ .text = line, .style = style }}, .{ .row_offset = @intCast(y), .col_offset = 0 });
             y -= 1;
