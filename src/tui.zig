@@ -7,7 +7,6 @@ const cmds = @import("cmds.zig");
 const Event = union(enum) {
     key_press: vaxis.Key,
     winsize: vaxis.Winsize,
-    focus_in,
 };
 
 pub fn initTui(db: *sqlite.Db) !void {
@@ -51,7 +50,6 @@ pub fn initTui(db: *sqlite.Db) !void {
                 }
             },
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
-            else => {},
         }
         
         const win = vx.window();
