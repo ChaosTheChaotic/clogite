@@ -189,11 +189,15 @@ fn installSqliteZstd(
     });
     check_and_clone.has_side_effects = true;
 
-    const patch_cmd = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", cargo_toml });
-    patch_cmd.step.dependOn(&check_and_clone.step);
+    const patch_cmd_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", cargo_toml });
+    patch_cmd_static.step.dependOn(&check_and_clone.step);
+
+    const patch_cmd_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info/d", b.pathJoin(&.{ build_path, "src", "create_extension.rs" }) });
+    patch_cmd_log.step.dependOn(&check_and_clone.step);
 
     const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml, "--features", "build_extension" });
-    cargo_build.step.dependOn(&patch_cmd.step);
+    cargo_build.step.dependOn(&patch_cmd_static.step);
+    cargo_build.step.dependOn(&patch_cmd_log.step);
 
     exe.step.dependOn(&cargo_build.step);
 
