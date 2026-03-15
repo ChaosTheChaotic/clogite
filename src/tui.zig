@@ -76,10 +76,10 @@ pub fn initTui(db: *sqlite.Db) !void {
         });
 
         const now = std.time.timestamp();
-        var y: u16 = 0;
+        var y: i32 = @as(i32, list_win.height) - 1;
 
         for (history) |cmd| {
-            if (y >= list_win.height) break;
+            if (y < 0) break;
 
             var ago_buf: [32]u8 = undefined;
             var dur_buf: [32]u8 = undefined;
@@ -98,8 +98,11 @@ pub fn initTui(db: *sqlite.Db) !void {
 
             const line = std.fmt.bufPrint(&line_buf, "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content }) catch "";
 
-            _ = list_win.print(&.{ .{ .text = line } }, .{ .row_offset = y, .col_offset = 0 });
-            y += 1;
+            _ = list_win.print(&.{ .{ .text = line } }, .{ 
+                .row_offset = @intCast(y), 
+                .col_offset = 0 
+            });
+            y -= 1;
         }
 
         text_input.draw(search);
