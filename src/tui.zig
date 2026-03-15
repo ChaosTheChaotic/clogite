@@ -61,10 +61,14 @@ pub fn initTui(db: *sqlite.Db) !void {
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
         }
 
-        const search = text_input.sliceToCursor(&buf);
+        var search = text_input.sliceToCursor(&buf);
 
         if (search.len > 0) {
-            history = try cmds.searchCommands(alloc, db, search, std.mem.startsWith(u8, search, "\\c"));
+            const caseInsensitive: bool = std.mem.startsWith(u8, search, "\\c");
+            if (caseInsensitive) {
+                search = search[2..];
+            }
+            history = try cmds.searchCommands(alloc, db, search, caseInsensitive);
         } else {
             history = try cmds.getCommands(alloc, db, null);
         }
