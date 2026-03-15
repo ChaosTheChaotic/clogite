@@ -86,7 +86,7 @@ pub fn getCommands(alloc: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]C
 
     const limit_val: i64 = if (limit) |l| @as(i64, @intCast(l)) else -1;
 
-    return try stmt.all(Cmd, alloc, .{}, .{ limit_val });
+    return try stmt.all(Cmd, alloc, .{}, .{limit_val});
 }
 
 pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []const u8) !?Cmd {

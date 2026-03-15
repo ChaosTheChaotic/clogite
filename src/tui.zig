@@ -58,7 +58,7 @@ pub fn initTui(db: *sqlite.Db) !void {
             },
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
         }
-        
+
         const win = vx.window();
         win.clear();
 
@@ -90,28 +90,18 @@ pub fn initTui(db: *sqlite.Db) !void {
             var dur_buf: [32]u8 = undefined;
 
             const diff = now - cmd.last_run_at;
-            const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now"
-                else if (diff < 3600) std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) catch ""
-                else if (diff < 86400) std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) catch ""
-                else std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)}) catch "";
+            const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now" else if (diff < 3600) std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) catch "" else if (diff < 86400) std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) catch "" else std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)}) catch "";
 
             const dur_str = if (cmd.last_duration_ms < 1000)
                 std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
             else
                 std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
 
-            const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ 
-                ago_str, 
-                dur_str, 
-                cmd.content 
-            });
+            const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content });
 
             const style: vaxis.Style = if (selected_idx >= 0 and i == @as(usize, @intCast(selected_idx))) .{ .reverse = true } else .{};
 
-            _ = list_win.print(&.{ .{ .text = line, .style = style } }, .{ 
-                .row_offset = @intCast(y), 
-                .col_offset = 0 
-            });
+            _ = list_win.print(&.{.{ .text = line, .style = style }}, .{ .row_offset = @intCast(y), .col_offset = 0 });
             y -= 1;
         }
 
