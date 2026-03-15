@@ -88,7 +88,6 @@ pub fn initTui(db: *sqlite.Db) !void {
 
             var ago_buf: [32]u8 = undefined;
             var dur_buf: [32]u8 = undefined;
-            var line_buf: [512]u8 = undefined;
 
             const diff = now - cmd.last_run_at;
             const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now"
@@ -101,7 +100,11 @@ pub fn initTui(db: *sqlite.Db) !void {
             else
                 std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
 
-            const line = std.fmt.bufPrint(&line_buf, "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content }) catch "";
+            const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ 
+                ago_str, 
+                dur_str, 
+                cmd.content 
+            });
 
             const style: vaxis.Style = if (selected_idx >= 0 and i == @as(usize, @intCast(selected_idx))) .{ .reverse = true } else .{};
 
