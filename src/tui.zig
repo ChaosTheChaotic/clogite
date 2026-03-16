@@ -130,6 +130,8 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                     const cmd = history[@intCast(selected_idx)].content;
                     try vx.exitAltScreen(tty.writer());
                     return try alloc.dupe(u8, cmd);
+                } else if (key.matches('d', .{ .ctrl = true })) {
+                    try cmds.removeCommand(db, history[@intCast(selected_idx)].content);
                 } else {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
