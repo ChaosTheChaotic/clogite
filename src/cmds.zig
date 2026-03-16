@@ -12,6 +12,20 @@ pub const Cmd = struct {
     total_duration_ms: i64,
 };
 
+pub const ExitCodeStat = struct {
+    exit_code: i64,
+    frequency: i64,
+};
+
+pub const CmdDetail = struct {
+    cmd: Cmd,
+    exit_codes: []ExitCodeStat,
+
+    pub fn deinit(self: CmdDetail, allocator: std.mem.Allocator) void {
+        allocator.free(self.exit_codes);
+    }
+};
+
 // Makes commands that are identically parsed be the same
 fn normalizeCommand(alloc: std.mem.Allocator, raw_cmd: []const u8) ![]const u8 {
     var tokens = std.mem.tokenizeAny(u8, raw_cmd, " \t\n\r");
@@ -89,23 +103,38 @@ pub fn getCommands(alloc: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]C
     return try stmt.all(Cmd, alloc, .{}, .{limit_val});
 }
 
-pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []const u8) !?Cmd {
+pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []const u8) !?CmdDetail {
     const clean_cmd = try normalizeCommand(allocator, raw_cmd);
     defer allocator.free(clean_cmd);
 
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(clean_cmd, &hash, .{});
 
-    var stmt = try db.prepare(
+    var cmd_stmt = try db.prepare(
         \\SELECT id, content, last_run_at, last_exit_code, 
         \\last_duration_ms, run_count, total_duration_ms 
         \\FROM commands WHERE content_hash = ?
     );
-    defer stmt.deinit();
+    defer cmd_stmt.deinit();
 
-    return try stmt.oneAlloc(Cmd, allocator, .{}, .{
+    const cmd = (try cmd_stmt.oneAlloc(Cmd, allocator, .{}, .{
         .content_hash = &hash,
-    });
+    })) orelse return null;
+
+    var stats_stmt = try db.prepare(
+        \\SELECT exit_code, frequency 
+        \\FROM exit_code_stats 
+        \\WHERE command_id = ? 
+        \\ORDER BY frequency DESC
+    );
+    defer stats_stmt.deinit();
+
+    const exit_codes = try stats_stmt.all(ExitCodeStat, allocator, .{}, .{cmd.id});
+
+    return CmdDetail{
+        .cmd = cmd,
+        .exit_codes = exit_codes,
+    };
 }
 
 pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool) ![]Cmd {

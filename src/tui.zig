@@ -9,6 +9,11 @@ const Event = union(enum) {
     winsize: vaxis.Winsize,
 };
 
+const Screen = enum {
+    history,
+    info,
+};
+
 pub fn initTui(db: *sqlite.Db) !?[]const u8 {
     const alloc = std.heap.smp_allocator;
 
@@ -40,83 +45,121 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
     var selected_idx: i64 = 0;
     var scroll_offset: usize = 0;
+    var displayed_screen: Screen = .history;
 
     while (true) {
         _ = arena.reset(.retain_capacity);
 
         const win = vx.window();
-        const list_height = win.height - 3;
-
-        var search = text_input.sliceToCursor(&buf);
-        if (search.len > 0) {
-            const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
-            const actual_search = if (caseInsensitive) search[2..] else search;
-            history = try cmds.searchCommands(alloc, db, actual_search, caseInsensitive);
-        } else {
-            history = try cmds.getCommands(alloc, db, null);
-        }
-
         win.clear();
-        const search_win = win.child(.{
-            .x_off = 0,
-            .y_off = win.height - 3,
-            .height = 3,
-            .border = .{ .where = .all },
-        });
+        const list_height = win.height - 3;
+        if (displayed_screen == .history) {
 
-        const list_win = win.child(.{
-            .x_off = 0,
-            .y_off = 0,
-            .height = list_height,
-            .border = .{ .where = .all },
-        });
+            var search = text_input.sliceToCursor(&buf);
+            if (search.len > 0) {
+                const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
+                const actual_search = if (caseInsensitive) search[2..] else search;
+                history = try cmds.searchCommands(alloc, db, actual_search, caseInsensitive);
+            } else {
+                history = try cmds.getCommands(alloc, db, null);
+            }
 
-        const now = std.time.timestamp();
-        var y: i32 = @as(i32, list_win.height) - 1;
+            const search_win = win.child(.{
+                .x_off = 0,
+                .y_off = win.height - 3,
+                .height = 3,
+                .border = .{ .where = .all },
+            });
 
-        const end_idx = @min(history.len, scroll_offset + list_win.height);
-        const visible_history = history[scroll_offset..end_idx];
+            const list_win = win.child(.{
+                .x_off = 0,
+                .y_off = 0,
+                .height = list_height,
+                .border = .{ .where = .all },
+            });
 
-        for (visible_history, 0..) |cmd, i| {
-            if (y < 0) break;
+            const now = std.time.timestamp();
+            var y: i32 = @as(i32, list_win.height) - 1;
 
-            const current_item_idx = scroll_offset + i;
-            var ago_buf: [32]u8 = undefined;
-            var dur_buf: [32]u8 = undefined;
+            const end_idx = @min(history.len, scroll_offset + list_win.height);
+            const visible_history = history[scroll_offset..end_idx];
 
-            const diff = now - cmd.last_run_at;
-            const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now" else if (diff < 3600) std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) catch "" else if (diff < 86400) std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) catch "" else std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)}) catch "";
+            for (visible_history, 0..) |cmd, i| {
+                if (y < 0) break;
 
-            const dur_str = if (cmd.last_duration_ms < 1000)
-                std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
-            else
-                std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
+                const current_item_idx = scroll_offset + i;
+                var ago_buf: [32]u8 = undefined;
+                var dur_buf: [32]u8 = undefined;
 
-            const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content });
+                const diff = now - cmd.last_run_at;
+                const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now" else if (diff < 3600) std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) catch "" else if (diff < 86400) std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) catch "" else std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)}) catch "";
 
-            const style: vaxis.Style = if (current_item_idx == selected_idx) .{ .reverse = true } else .{};
+                const dur_str = if (cmd.last_duration_ms < 1000)
+                    std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
+                else
+                    std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
 
-            _ = list_win.print(&.{.{ .text = line, .style = style }}, .{ .row_offset = @intCast(y), .col_offset = 0 });
-            y -= 1;
+                const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content });
+
+                const style: vaxis.Style = if (current_item_idx == selected_idx) .{ .reverse = true } else .{};
+
+                _ = list_win.print(&.{.{ .text = line, .style = style }}, .{ .row_offset = @intCast(y), .col_offset = 0 });
+                y -= 1;
+            }
+
+            text_input.draw(search_win);
+        } else {
+            win.clear();
+            const detail_win = win.child(.{
+                .x_off = 4,
+                .y_off = 2,
+                .width = if (win.width > 10) win.width - 8 else win.width,
+                .height = if (win.height > 6) win.height - 4 else win.height,
+                .border = .{ .where = .all },
+            });
+
+            const current_cmd = history[@intCast(selected_idx)].content;
+            if (try cmds.getCommandInfo(arena.allocator(), db, current_cmd)) |d| {
+                var row: u16 = 1;
+                _ = detail_win.print(&.{.{ .text = " COMMAND DETAILS ", .style = .{ .reverse = true } }}, .{ .row_offset = row, .col_offset = 2 });
+                row += 2;
+                
+                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "Content: {s}", .{d.cmd.content}) }}, .{ .row_offset = row, .col_offset = 2 });
+                row += 2;
+                
+                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "Runs:     {d}", .{d.cmd.run_count}) }}, .{ .row_offset = row, .col_offset = 2 });
+                row += 1;
+                
+                const avg = @as(f64, @floatFromInt(d.cmd.total_duration_ms)) / @as(f64, @floatFromInt(@max(1, d.cmd.run_count)));
+                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "Avg Dur:  {d:.2}ms", .{avg}) }}, .{ .row_offset = row, .col_offset = 2 });
+                row += 2;
+                
+                _ = detail_win.print(&.{.{ .text = "EXIT CODE STATS:" }}, .{ .row_offset = row, .col_offset = 2 });
+                row += 1;
+                for (d.exit_codes) |ec| {
+                    _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "  Code {d:3} : {d} times", .{ec.exit_code, ec.frequency}) }}, .{ .row_offset = row, .col_offset = 2 });
+                    row += 1;
+                }
+
+                _ = detail_win.print(&.{.{ .text = "Press any key to return", .style = .{ .dim = true } }}, .{ .row_offset = @intCast(detail_win.height - 2), .col_offset = 2 });
+            }
         }
-
-        text_input.draw(search_win);
         try vx.render(tty.writer());
 
         const event = loop.nextEvent();
 
         switch (event) {
             .key_press => |key| {
-                if (key.matches('c', .{ .ctrl = true })) {
-                    break;
-                } else if (key.matches(vaxis.Key.up, .{})) {
+                if (key.matches('c', .{ .ctrl = true }) or key.matches(vaxis.Key.escape, .{})) {
+                    if (displayed_screen == .history) break else displayed_screen = .history;
+                } else if (key.matches(vaxis.Key.up, .{}) and displayed_screen == .history) {
                     if (history.len > 0 and selected_idx < history.len - 1) {
                         selected_idx += 1;
                         if (selected_idx >= scroll_offset + list_height) {
                             scroll_offset += 1;
                         }
                     }
-                } else if (key.matches(vaxis.Key.down, .{})) {
+                } else if (key.matches(vaxis.Key.down, .{}) and displayed_screen == .history) {
                     if (selected_idx > 0) {
                         selected_idx -= 1;
                         if (selected_idx < scroll_offset) {
@@ -132,6 +175,8 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                     return try alloc.dupe(u8, cmd);
                 } else if (key.matches('d', .{ .ctrl = true })) {
                     try cmds.removeCommand(db, history[@intCast(selected_idx)].content);
+                } else if (key.matches('o', .{ .ctrl = true })) {
+                    displayed_screen = .info;
                 } else {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
