@@ -86,16 +86,17 @@ pub fn main() !void {
                 db = try clogite.db.initDb();
                 if (try clogite.tui.initTui(&db.?)) |selected_cmd| {
                     defer alloc.free(selected_cmd);
-                    const escaped = try std.mem.replaceOwned(u8, alloc, selected_cmd, "'", "'\\''");
-                    defer alloc.free(escaped);
                     const shell_env = std.process.getEnvVarOwned(alloc, "SHELL") catch |err|
-                    if (err == error.EnvironmentVariableNotFound) null else return err;
+                        if (err == error.EnvironmentVariableNotFound) null else return err;
 
                     if (shell_env) |shell_path| {
                         defer alloc.free(shell_path);
 
                         if (std.mem.endsWith(u8, shell_path, "zsh")) {
-                            try clogite.print("print -z '{s}'", .{escaped});
+                            var stdout = std.fs.File.stdout().writer(&.{});
+
+                            try stdout.interface.writeAll(selected_cmd);
+                            try stdout.interface.flush();
                         } else if (std.mem.endsWith(u8, shell_path, "bash")) {
                             // I dont know what to do for this one
                         } else {
@@ -135,7 +136,6 @@ pub fn main() !void {
                     \\# Bind Up Arrow to clear the line (^U) and run the view UI
                     \\bindkey -s '^[[A' '^Ueval $(clogite view)\n'
                     \\bindkey -s '^[OA' '^Ueval $(clogite view)\n'
-                    \\
                 ;
                 var stdout = std.fs.File.stdout().writer(&.{});
 

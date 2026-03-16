@@ -124,17 +124,12 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                         }
                     } else break;
                 } else if (key.matches(vaxis.Key.tab, .{})) {
-                    return try alloc.dupe(u8, history[@intCast(selected_idx)].content);
+                    const cmd = history[@intCast(selected_idx)].content;
+                    return try std.fmt.allocPrint(alloc, "print -z '{s}'", .{cmd});
                 } else if (key.matches(vaxis.Key.enter, .{})) {
                     const cmd = history[@intCast(selected_idx)].content;
-
                     try vx.exitAltScreen(tty.writer());
-
-                    var child = std.process.Child.init(&[_][]const u8{ "/bin/sh", "-c", cmd }, alloc);
-
-                    _ = try child.spawnAndWait();
-
-                    return null;
+                    return try alloc.dupe(u8, cmd);
                 } else {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
