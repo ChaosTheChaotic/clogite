@@ -7,6 +7,7 @@ const SubCmd = enum {
     add,
     remove,
     view,
+    init,
 
     pub fn parse(str: []const u8) ?SubCmd {
         if (std.mem.eql(u8, str, "rem")) {
@@ -23,6 +24,7 @@ fn print_help() !void {
         \\Usage:
         \\  clogite add "<command>" <exit_code> <duration_ms>
         \\  clogite rem "<command>"
+        \\  clogite init
         \\  clogite view
         \\  clogite version
         \\  clogite help
@@ -30,6 +32,7 @@ fn print_help() !void {
         \\Options:
         \\  add      Log a new command execution.
         \\  rem/remove  Remove a command from the history.
+        \\  init Adds the needed commands for zsh to integrate the program properly
         \\  view     Open the TUI to search and view history.
         \\  version  Show program version.
     , .{});
@@ -79,8 +82,65 @@ pub fn main() !void {
                 return;
             },
             .view => {
+                const alloc = std.heap.smp_allocator;
                 db = try clogite.db.initDb();
-                try clogite.tui.initTui(&db.?);
+                if (try clogite.tui.initTui(&db.?)) |selected_cmd| {
+                    defer alloc.free(selected_cmd);
+                    const escaped = try std.mem.replaceOwned(u8, alloc, selected_cmd, "'", "'\\''");
+                    defer alloc.free(escaped);
+                    const shell_env = std.process.getEnvVarOwned(alloc, "SHELL") catch |err|
+                    if (err == error.EnvironmentVariableNotFound) null else return err;
+
+                    if (shell_env) |shell_path| {
+                        defer alloc.free(shell_path);
+
+                        if (std.mem.endsWith(u8, shell_path, "zsh")) {
+                            try clogite.print("print -z '{s}'", .{escaped});
+                        } else if (std.mem.endsWith(u8, shell_path, "bash")) {
+                            // I dont know what to do for this one
+                        } else {
+                            // I dont know or think about other shells very often
+                        }
+                    }
+                }
+                return;
+            },
+            .init => {
+                const zsh_init_script =
+                    \\zmodload zsh/datetime
+                    \\
+                    \\__clogite_preexec() {
+                    \\    __clogite_cmd=$1
+                    \\    __clogite_start=$EPOCHREALTIME
+                    \\}
+                    \\
+                    \\__clogite_precmd() {
+                    \\    local exit_code=$?
+                    \\    if [[ -n "$__clogite_start" && -n "$__clogite_cmd" ]]; then
+                    \\        local duration_ms=$(( (EPOCHREALTIME - __clogite_start) * 1000 ))
+                    \\        # Truncate fractional milliseconds
+                    \\        duration_ms=${duration_ms%.*}
+                    \\        
+                    \\        # Run asynchronously so prompt isn't delayed
+                    \\        clogite add "$__clogite_cmd" $exit_code $duration_ms &|
+                    \\    fi
+                    \\    __clogite_start=
+                    \\    __clogite_cmd=
+                    \\}
+                    \\
+                    \\autoload -Uz add-zsh-hook
+                    \\add-zsh-hook preexec __clogite_preexec
+                    \\add-zsh-hook precmd __clogite_precmd
+                    \\
+                    \\# Bind Up Arrow to clear the line (^U) and run the view UI
+                    \\bindkey -s '^[[A' '^Ueval $(clogite view)\n'
+                    \\bindkey -s '^[OA' '^Ueval $(clogite view)\n'
+                    \\
+                ;
+                var stdout = std.fs.File.stdout().writer(&.{});
+
+                try stdout.interface.writeAll(zsh_init_script);
+                try stdout.interface.flush();
                 return;
             },
         }

@@ -9,7 +9,7 @@ const Event = union(enum) {
     winsize: vaxis.Winsize,
 };
 
-pub fn initTui(db: *sqlite.Db) !void {
+pub fn initTui(db: *sqlite.Db) !?[]const u8 {
     const alloc = std.heap.smp_allocator;
 
     var buf: [1024]u8 = undefined;
@@ -122,9 +122,12 @@ pub fn initTui(db: *sqlite.Db) !void {
                         if (selected_idx < scroll_offset) {
                             scroll_offset -= 1;
                         }
-                    } else {
-                        break;
-                    }
+                    } else break;
+                } else if (key.matches(vaxis.Key.tab, .{})) {
+                    return try alloc.dupe(u8, history[@intCast(selected_idx)].content);
+                } else if (key.matches(vaxis.Key.enter, .{})) {
+                    // TODO: Run the command and exit null
+                    // Define argv and use exec? to replace program or spwan and detach
                 } else {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
@@ -135,4 +138,5 @@ pub fn initTui(db: *sqlite.Db) !void {
         }
     }
     try db_mod.maintenance(db);
+    return null;
 }
