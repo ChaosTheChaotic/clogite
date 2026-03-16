@@ -126,8 +126,15 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 } else if (key.matches(vaxis.Key.tab, .{})) {
                     return try alloc.dupe(u8, history[@intCast(selected_idx)].content);
                 } else if (key.matches(vaxis.Key.enter, .{})) {
-                    // TODO: Run the command and exit null
-                    // Define argv and use exec? to replace program or spwan and detach
+                    const cmd = history[@intCast(selected_idx)].content;
+
+                    try vx.exitAltScreen(tty.writer());
+
+                    var child = std.process.Child.init(&[_][]const u8{ "/bin/sh", "-c", cmd }, alloc);
+
+                    _ = try child.spawnAndWait();
+
+                    return null;
                 } else {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
