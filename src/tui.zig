@@ -23,6 +23,57 @@ const Screen = enum {
     info,
 };
 
+fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize) ![]const []const vaxis.Cell.Segment {
+    const cmd_highlighted = try highlightZsh(alloc, content, is_selected);
+
+    var wrapped_lines: std.ArrayList([]const vaxis.Cell.Segment) = .empty;
+    var current_line: std.ArrayList(vaxis.Cell.Segment) = .empty;
+    var current_col: usize = 0;
+
+    for (cmd_highlighted) |seg| {
+        if (seg.text.len + current_col > cmd_max_width and current_col > 0) {
+            if (std.mem.eql(u8, seg.text, " ")) {
+                continue;
+            }
+            try wrapped_lines.append(alloc, try current_line.toOwnedSlice(alloc));
+            current_line = .empty;
+            current_col = 0;
+        }
+
+        var text_left = seg.text;
+        while (text_left.len > 0) {
+            const space_left = cmd_max_width - current_col;
+            if (space_left == 0) {
+                try wrapped_lines.append(alloc, try current_line.toOwnedSlice(alloc));
+                current_line = .empty;
+                current_col = 0;
+                continue;
+            }
+            if (text_left.len <= space_left) {
+                try current_line.append(alloc, .{ .text = text_left, .style = seg.style });
+                current_col += text_left.len;
+                break;
+            } else {
+                const chunk = text_left[0..space_left];
+                try current_line.append(alloc, .{ .text = chunk, .style = seg.style });
+                try wrapped_lines.append(alloc, try current_line.toOwnedSlice(alloc));
+                current_line = .empty;
+                current_col = 0;
+                text_left = text_left[space_left..];
+            }
+        }
+    }
+    if (current_line.items.len > 0) {
+        try wrapped_lines.append(alloc, try current_line.toOwnedSlice(alloc));
+    }
+
+    if (wrapped_lines.items.len == 0) {
+        try wrapped_lines.append(alloc, &.{});
+    }
+
+    return try wrapped_lines.toOwnedSlice(alloc);
+}
+
 fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: bool) ![]vaxis.Cell.Segment {
     var segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
     errdefer segments.deinit(allocator);
@@ -127,13 +178,44 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
             });
 
             const now = std.time.timestamp();
-            var y: i32 = @as(i32, list_win.height) - 1;
+            var y: i32 = @as(i32, @intCast(list_win.height)) - 1;
 
-            const end_idx = @min(history.len, scroll_offset + list_win.height);
-            const visible_history = history[scroll_offset..end_idx];
+            const prefix_width: usize = 24; // ago (11) + sep (2) + dur (9) + sep (2)
+            const cmd_max_width: usize = if (list_win.width > prefix_width) list_win.width - prefix_width else 1;
 
-            for (visible_history, 0..) |cmd, i| {
+            if (history.len > 0) {
+                if (selected_idx >= @as(i64, @intCast(history.len))) {
+                    selected_idx = @as(i64, @intCast(history.len)) - 1;
+                }
+                if (selected_idx < scroll_offset) {
+                    scroll_offset = @intCast(selected_idx);
+                } else {
+                    var total_lines: usize = 0;
+                    var i: usize = @intCast(selected_idx);
+                    while (true) {
+                        const wrapped = try wrapCommand(aa, history[i].content, false, cmd_max_width);
+                        total_lines += wrapped.len;
+
+                        if (total_lines > list_height) {
+                            if (i == @as(usize, @intCast(selected_idx))) {
+                                scroll_offset = i;
+                            } else {
+                                scroll_offset = i + 1;
+                            }
+                            break;
+                        }
+                        if (i == 0) {
+                            scroll_offset = 0;
+                            break;
+                        }
+                        i -= 1;
+                    }
+                }
+            }
+
+            for (history[scroll_offset..], 0..) |cmd, i| {
                 if (y < 0) break;
+
                 const current_item_idx = scroll_offset + i;
                 const is_selected = (current_item_idx == selected_idx);
                 const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
@@ -141,20 +223,16 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 var ago_buf: [32]u8 = undefined;
                 var dur_buf: [32]u8 = undefined;
                 const diff = now - cmd.last_run_at;
-
                 const ago_str = if (diff < 60) try std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) else if (diff < 3600) try std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) else if (diff < 86400) try std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) else try std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)});
-
                 const dur_str = if (cmd.last_duration_ms < 1000)
                     try std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms})
                 else
                     try std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0});
 
-                // Build line segments
-                var line_segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
-
                 var base_ago = style_dim;
                 var base_dur = style_dur;
                 var base_sep = style_sep;
+
                 if (is_selected) {
                     base_ago.dim = false;
                     base_dur.dim = false;
@@ -168,25 +246,41 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 const ago_text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str});
                 const dur_text = try std.fmt.allocPrint(aa, "{s:>8} ", .{dur_str});
 
-                try line_segments.append(aa, .{ .text = ago_text, .style = base_ago });
-                try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
-                try line_segments.append(aa, .{ .text = dur_text, .style = base_dur });
-                try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
+                const wrapped = try wrapCommand(aa, cmd.content, is_selected, cmd_max_width);
+                const lines_count = wrapped.len;
 
-                const cmd_highlighted = try highlightZsh(aa, cmd.content, is_selected);
-                try line_segments.appendSlice(aa, cmd_highlighted);
+                for (wrapped, 0..) |line_segs, l| {
+                    const draw_y = y - @as(i32, @intCast(lines_count)) + 1 + @as(i32, @intCast(l));
+                    if (draw_y < 0 or draw_y >= list_win.height) continue;
 
-                var total_width: usize = 10 + 1 + 2 + 8 + 1 + 2; // Fixed widths for ago, dur, seps
-                for (cmd_highlighted) |seg| total_width += seg.text.len;
+                    var line_segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
 
-                if (is_selected and total_width < list_win.width) {
-                    const padding = try aa.alloc(u8, list_win.width - total_width);
-                    @memset(padding, ' ');
-                    try line_segments.append(aa, .{ .text = padding, .style = .{ .bg = sel_bg } });
+                    if (l == 0) {
+                        try line_segments.append(aa, .{ .text = ago_text, .style = base_ago });
+                        try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
+                        try line_segments.append(aa, .{ .text = dur_text, .style = base_dur });
+                        try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
+                    } else {
+                        const padding = try aa.alloc(u8, prefix_width);
+                        @memset(padding, ' ');
+                        try line_segments.append(aa, .{ .text = padding, .style = .{ .bg = sel_bg } });
+                    }
+
+                    try line_segments.appendSlice(aa, line_segs);
+
+                    var total_width: usize = prefix_width;
+                    for (line_segs) |seg| total_width += seg.text.len;
+
+                    if (is_selected and total_width < list_win.width) {
+                        const padding = try aa.alloc(u8, list_win.width - total_width);
+                        @memset(padding, ' ');
+                        try line_segments.append(aa, .{ .text = padding, .style = .{ .bg = sel_bg } });
+                    }
+
+                    _ = list_win.print(line_segments.items, .{ .row_offset = @intCast(draw_y), .col_offset = 0 });
                 }
 
-                _ = list_win.print(line_segments.items, .{ .row_offset = @intCast(y), .col_offset = 0 });
-                y -= 1;
+                y -= @as(i32, @intCast(lines_count));
             }
 
             text_input.draw(search_win);
@@ -229,15 +323,9 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 if (key.matches('c', .{ .ctrl = true }) or key.matches(vaxis.Key.escape, .{})) {
                     if (displayed_screen == .history) break else displayed_screen = .history;
                 } else if (key.matches(vaxis.Key.up, .{}) and displayed_screen == .history) {
-                    if (history.len > 0 and selected_idx < history.len - 1) {
-                        selected_idx += 1;
-                        if (selected_idx >= scroll_offset + list_height) scroll_offset += 1;
-                    }
+                    if (history.len > 0 and selected_idx < history.len - 1) selected_idx += 1;
                 } else if (key.matches(vaxis.Key.down, .{}) and displayed_screen == .history) {
-                    if (selected_idx > 0) {
-                        selected_idx -= 1;
-                        if (selected_idx < scroll_offset) scroll_offset -= 1;
-                    } else break;
+                    if (selected_idx > 0) selected_idx -= 1 else break;
                 } else if (key.matches(vaxis.Key.tab, .{})) {
                     const cmd = history[@intCast(selected_idx)].content;
                     return try std.fmt.allocPrint(alloc, "print -z '{s}'", .{cmd});
