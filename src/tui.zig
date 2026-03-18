@@ -153,16 +153,16 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
         win.clear();
         const list_height = win.height - 3;
 
-        if (displayed_screen == .history) {
-            const search = text_input.sliceToCursor(&buf);
-            if (search.len > 0) {
-                const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
-                const actual_search = if (caseInsensitive) search[2..] else search;
-                history = try cmds.searchCommands(aa, db, actual_search, caseInsensitive);
-            } else {
-                history = try cmds.getCommands(aa, db, null);
-            }
+        const search = text_input.sliceToCursor(&buf);
+        if (search.len > 0) {
+            const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
+            const actual_search = if (caseInsensitive) search[2..] else search;
+            history = try cmds.searchCommands(aa, db, actual_search, caseInsensitive);
+        } else {
+            history = try cmds.getCommands(aa, db, null);
+        }
 
+        if (displayed_screen == .history) {
             const search_win = win.child(.{
                 .x_off = 0,
                 .y_off = win.height - 3,
@@ -290,28 +290,67 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 .y_off = 2,
                 .width = if (win.width > 10) win.width - 8 else win.width,
                 .height = if (win.height > 6) win.height - 4 else win.height,
-                .border = .{ .where = .all },
+                .border = .{ .where = .all, .style = style_sep },
             });
+
             const current_cmd = history[@intCast(selected_idx)].content;
             if (try cmds.getCommandInfo(aa, db, current_cmd)) |d| {
-                var row: u16 = 1;
-                _ = detail_win.print(&.{.{ .text = " COMMAND DETAILS ", .style = .{ .reverse = true, .bold = true } }}, .{ .row_offset = row, .col_offset = 2 });
+                var row: i32 = 1;
+                const margin: u16 = 2;
+
+                _ = detail_win.print(&.{.{ .text = " COMMAND DETAILS ", .style = .{ .reverse = true, .bold = true } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
                 row += 2;
-                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "Content: {s}", .{d.cmd.content}) }}, .{ .row_offset = row, .col_offset = 2 });
-                row += 2;
-                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "Runs:     {d}", .{d.cmd.run_count}), .style = style_dur }}, .{ .row_offset = row, .col_offset = 2 });
+
+                _ = detail_win.print(&.{.{ .text = "COMMAND:", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.cyan) } } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
                 row += 1;
-                const avg = @as(f64, @floatFromInt(d.cmd.total_duration_ms)) / @as(f64, @floatFromInt(@max(1, d.cmd.run_count)));
-                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "Avg Dur:  {d:.2}ms", .{avg}), .style = style_dur }}, .{ .row_offset = row, .col_offset = 2 });
-                row += 2;
-                _ = detail_win.print(&.{.{ .text = "EXIT CODE STATS:", .style = .{ .bold = true } }}, .{ .row_offset = row, .col_offset = 2 });
-                row += 1;
-                for (d.exit_codes) |ec| {
-                    const ec_style: vaxis.Style = if (ec.exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } };
-                    _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "  Code {d:3} : {d} times", .{ ec.exit_code, ec.frequency }), .style = ec_style }}, .{ .row_offset = row, .col_offset = 2 });
+
+                const cmd_width = if (detail_win.width > margin * 2) detail_win.width - (margin * 2) else 1;
+                const wrapped = try wrapCommand(aa, d.cmd.content, false, cmd_width);
+                for (wrapped) |line_segs| {
+                    if (row >= detail_win.height - 1) break;
+                    _ = detail_win.print(line_segs, .{ .row_offset = @intCast(row), .col_offset = margin });
                     row += 1;
                 }
-                _ = detail_win.print(&.{.{ .text = "Press ESC to return", .style = style_dim }}, .{ .row_offset = @intCast(detail_win.height - 2), .col_offset = 2 });
+                row += 1;
+
+                if (row < detail_win.height - 1) {
+                    _ = detail_win.print(&.{.{ .text = "STATISTICS:", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.cyan) } } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
+                    row += 1;
+
+                    const avg_dur = @as(f64, @floatFromInt(d.cmd.total_duration_ms)) / @as(f64, @floatFromInt(@max(1, d.cmd.run_count)));
+
+                    const stats = [_]struct { label: []const u8, value: []const u8, style: vaxis.Style }{
+                        .{ .label = "Total Runs:     ", .value = try std.fmt.allocPrint(aa, "{d}", .{d.cmd.run_count}), .style = .{} },
+                        .{ .label = "Avg Duration:   ", .value = try std.fmt.allocPrint(aa, "{d:.2}ms", .{avg_dur}), .style = style_dur },
+                        .{ .label = "Last Exit Code: ", .value = try std.fmt.allocPrint(aa, "{d}", .{d.cmd.last_exit_code}), .style = if (d.cmd.last_exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } } },
+                    };
+
+                    for (stats) |stat| {
+                        if (row >= detail_win.height - 1) break;
+                        var line: std.ArrayList(vaxis.Cell.Segment) = .empty;
+                        try line.append(aa, .{ .text = stat.label, .style = style_dim });
+                        try line.append(aa, .{ .text = stat.value, .style = stat.style });
+                        _ = detail_win.print(line.items, .{ .row_offset = @intCast(row), .col_offset = margin });
+                        row += 1;
+                    }
+                }
+                row += 1;
+
+                if (row < detail_win.height - 2) {
+                    _ = detail_win.print(&.{.{ .text = "EXIT CODE FREQUENCY:", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.cyan) } } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
+                    row += 1;
+
+                    for (d.exit_codes) |ec| {
+                        if (row >= detail_win.height - 2) break;
+                        const ec_style: vaxis.Style = if (ec.exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } };
+                        const ec_text = try std.fmt.allocPrint(aa, "  Code {d:3} : {d} times", .{ ec.exit_code, ec.frequency });
+                        _ = detail_win.print(&.{.{ .text = ec_text, .style = ec_style }}, .{ .row_offset = @intCast(row), .col_offset = margin });
+                        row += 1;
+                    }
+                }
+
+                const footer_style = style_dim;
+                _ = detail_win.print(&.{.{ .text = " [ESC] Back ", .style = footer_style }}, .{ .row_offset = @intCast(detail_win.height - 1), .col_offset = margin });
             }
         }
 
@@ -331,13 +370,12 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                     return try std.fmt.allocPrint(alloc, "print -z '{s}'", .{cmd});
                 } else if (key.matches(vaxis.Key.enter, .{})) {
                     const cmd = history[@intCast(selected_idx)].content;
-                    try vx.exitAltScreen(tty.writer());
                     return try alloc.dupe(u8, cmd);
                 } else if (key.matches('d', .{ .ctrl = true })) {
                     try cmds.removeCommand(db, history[@intCast(selected_idx)].content);
                 } else if (key.matches('o', .{ .ctrl = true })) {
                     displayed_screen = .info;
-                } else {
+                } else if (displayed_screen == .history) {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
                     scroll_offset = 0;
