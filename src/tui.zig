@@ -83,7 +83,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
-    
+
     var history = try cmds.getCommands(arena.allocator(), db, null);
 
     var selected_idx: i64 = 0;
@@ -97,7 +97,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
     while (true) {
         _ = arena.reset(.retain_capacity);
         const aa = arena.allocator();
-        
+
         const win = vx.window();
         win.clear();
         const list_height = win.height - 3;
@@ -141,7 +141,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 var ago_buf: [32]u8 = undefined;
                 var dur_buf: [32]u8 = undefined;
                 const diff = now - cmd.last_run_at;
-                
+
                 const ago_str = if (diff < 60) try std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) else if (diff < 3600) try std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) else if (diff < 86400) try std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) else try std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)});
 
                 const dur_str = if (cmd.last_duration_ms < 1000)
@@ -151,7 +151,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
                 // Build line segments
                 var line_segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
-                
+
                 var base_ago = style_dim;
                 var base_dur = style_dur;
                 var base_sep = style_sep;
@@ -172,7 +172,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
                 try line_segments.append(aa, .{ .text = dur_text, .style = base_dur });
                 try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
-                
+
                 const cmd_highlighted = try highlightZsh(aa, cmd.content, is_selected);
                 try line_segments.appendSlice(aa, cmd_highlighted);
 
@@ -214,13 +214,13 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 row += 1;
                 for (d.exit_codes) |ec| {
                     const ec_style: vaxis.Style = if (ec.exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } };
-                    _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "  Code {d:3} : {d} times", .{ec.exit_code, ec.frequency}), .style = ec_style }}, .{ .row_offset = row, .col_offset = 2 });
+                    _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "  Code {d:3} : {d} times", .{ ec.exit_code, ec.frequency }), .style = ec_style }}, .{ .row_offset = row, .col_offset = 2 });
                     row += 1;
                 }
                 _ = detail_win.print(&.{.{ .text = "Press ESC to return", .style = style_dim }}, .{ .row_offset = @intCast(detail_win.height - 2), .col_offset = 2 });
             }
         }
-        
+
         try vx.render(tty.writer());
         const event = loop.nextEvent();
 
