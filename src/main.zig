@@ -30,11 +30,20 @@ fn print_help() !void {
         \\  clogite help
         \\
         \\Options:
-        \\  add      Log a new command execution.
-        \\  rem/remove  Remove a command from the history.
-        \\  init Adds the needed commands for zsh to integrate the program properly
-        \\  view     Open the TUI to search and view history.
-        \\  version  Show program version.
+        \\  add          Log a new command execution.
+        \\  rem/remove   Remove a command from the history.
+        \\  init         Adds the needed commands for zsh to integrate the program properly.
+        \\  view         Open the TUI to search and view history.
+        \\  version      Show program version.
+        \\
+        \\TUI Keybinds:
+        \\  ↑ / ↓        Navigate command history 
+        \\  Enter        Select and run the highlighted command 
+        \\  Tab          Insert command into your terminal prompt 
+        \\  Ctrl + O     View detailed statistics for the selected command 
+        \\  Ctrl + D     Remove the selected command from history 
+        \\  Esc / Ctrl+C Back to history or exit the TUI 
+        \\  Typing       Filters the command history (search) 
     , .{});
 }
 
