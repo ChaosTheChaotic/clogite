@@ -156,8 +156,11 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 var base_sep = style_sep;
                 if (is_selected) {
                     base_ago.reverse = true;
+                    base_ago.dim = false;
                     base_dur.reverse = true;
+                    base_dur.dim = false;
                     base_sep.reverse = true;
+                    base_sep.dim = false;
                 }
 
                 try line_segments.append(aa, .{ .text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str}), .style = base_ago });

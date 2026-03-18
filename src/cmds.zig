@@ -13,8 +13,8 @@ pub const Cmd = struct {
 };
 
 pub const ExitCodeStat = struct {
-    exit_code: i64,
-    frequency: i64,
+    exit_code: u8,
+    frequency: u64,
 };
 
 pub const CmdDetail = struct {
