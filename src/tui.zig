@@ -27,15 +27,17 @@ fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: 
     var segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
     errdefer segments.deinit(allocator);
 
+    const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
+
     var tokens = std.mem.tokenizeAny(u8, content, " ");
     var is_first = true;
 
     while (tokens.next()) |token| {
         if (!is_first) {
-            try segments.append(allocator, .{ .text = " ", .style = .{} });
+            try segments.append(allocator, .{ .text = " ", .style = .{ .bg = sel_bg } });
         }
 
-        const style: vaxis.Style = blk: {
+        var style: vaxis.Style = blk: {
             if (is_first) {
                 break :blk .{ .fg = .{ .index = @intFromEnum(Colors.green) }, .bold = true };
             } else if (std.mem.startsWith(u8, token, "-")) {
@@ -48,10 +50,8 @@ fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: 
             break :blk .{};
         };
 
-        var final_style = style;
-        if (is_selected) final_style.reverse = true;
-
-        try segments.append(allocator, .{ .text = token, .style = final_style });
+        style.bg = sel_bg;
+        try segments.append(allocator, .{ .text = token, .style = style });
         is_first = false;
     }
 
@@ -136,6 +136,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 if (y < 0) break;
                 const current_item_idx = scroll_offset + i;
                 const is_selected = (current_item_idx == selected_idx);
+                const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
 
                 var ago_buf: [32]u8 = undefined;
                 var dur_buf: [32]u8 = undefined;
@@ -155,21 +156,34 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 var base_dur = style_dur;
                 var base_sep = style_sep;
                 if (is_selected) {
-                    base_ago.reverse = true;
                     base_ago.dim = false;
-                    base_dur.reverse = true;
                     base_dur.dim = false;
-                    base_sep.reverse = true;
                     base_sep.dim = false;
                 }
 
-                try line_segments.append(aa, .{ .text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str}), .style = base_ago });
+                base_ago.bg = sel_bg;
+                base_dur.bg = sel_bg;
+                base_sep.bg = sel_bg;
+
+                const ago_text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str});
+                const dur_text = try std.fmt.allocPrint(aa, "{s:>8} ", .{dur_str});
+
+                try line_segments.append(aa, .{ .text = ago_text, .style = base_ago });
                 try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
-                try line_segments.append(aa, .{ .text = try std.fmt.allocPrint(aa, "{s:>8} ", .{dur_str}), .style = base_dur });
+                try line_segments.append(aa, .{ .text = dur_text, .style = base_dur });
                 try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
                 
                 const cmd_highlighted = try highlightZsh(aa, cmd.content, is_selected);
                 try line_segments.appendSlice(aa, cmd_highlighted);
+
+                var total_width: usize = 10 + 1 + 2 + 8 + 1 + 2; // Fixed widths for ago, dur, seps
+                for (cmd_highlighted) |seg| total_width += seg.text.len;
+
+                if (is_selected and total_width < list_win.width) {
+                    const padding = try aa.alloc(u8, list_win.width - total_width);
+                    @memset(padding, ' ');
+                    try line_segments.append(aa, .{ .text = padding, .style = .{ .bg = sel_bg } });
+                }
 
                 _ = list_win.print(line_segments.items, .{ .row_offset = @intCast(y), .col_offset = 0 });
                 y -= 1;
