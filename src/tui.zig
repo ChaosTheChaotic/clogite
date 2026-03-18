@@ -4,6 +4,15 @@ const sqlite = @import("sqlite");
 const db_mod = @import("db.zig");
 const cmds = @import("cmds.zig");
 
+const Colors = enum(u8) {
+    green = 2,
+    cyan = 6,
+    yellow = 3,
+    magenta = 5,
+    gray = 8,
+    blue = 4,
+};
+
 const Event = union(enum) {
     key_press: vaxis.Key,
     winsize: vaxis.Winsize,
@@ -14,6 +23,41 @@ const Screen = enum {
     info,
 };
 
+fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: bool) ![]vaxis.Cell.Segment {
+    var segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
+    errdefer segments.deinit(allocator);
+
+    var tokens = std.mem.tokenizeAny(u8, content, " ");
+    var is_first = true;
+
+    while (tokens.next()) |token| {
+        if (!is_first) {
+            try segments.append(allocator, .{ .text = " ", .style = .{} });
+        }
+
+        const style: vaxis.Style = blk: {
+            if (is_first) {
+                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.green) }, .bold = true };
+            } else if (std.mem.startsWith(u8, token, "-")) {
+                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.cyan) } };
+            } else if (std.mem.startsWith(u8, token, "\"") or std.mem.startsWith(u8, token, "'")) {
+                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.yellow) } };
+            } else if (std.mem.startsWith(u8, token, "$")) {
+                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.magenta) } };
+            }
+            break :blk .{};
+        };
+
+        var final_style = style;
+        if (is_selected) final_style.reverse = true;
+
+        try segments.append(allocator, .{ .text = token, .style = final_style });
+        is_first = false;
+    }
+
+    return try segments.toOwnedSlice(allocator);
+}
+
 pub fn initTui(db: *sqlite.Db) !?[]const u8 {
     const alloc = std.heap.smp_allocator;
 
@@ -23,12 +67,10 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
     var vx = try vaxis.init(alloc, .{});
     defer vx.deinit(alloc, tty.writer());
-
     var loop: vaxis.Loop(Event) = .{
         .tty = &tty,
         .vaxis = &vx,
     };
-
     try loop.init();
 
     try loop.start();
@@ -41,27 +83,33 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
+    
     var history = try cmds.getCommands(arena.allocator(), db, null);
 
     var selected_idx: i64 = 0;
     var scroll_offset: usize = 0;
     var displayed_screen: Screen = .history;
 
+    const style_dim: vaxis.Style = .{ .dim = true };
+    const style_sep: vaxis.Style = .{ .fg = .{ .index = @intFromEnum(Colors.gray) }, .dim = true };
+    const style_dur: vaxis.Style = .{ .fg = .{ .index = @intFromEnum(Colors.blue) } };
+
     while (true) {
         _ = arena.reset(.retain_capacity);
-
+        const aa = arena.allocator();
+        
         const win = vx.window();
         win.clear();
         const list_height = win.height - 3;
-        if (displayed_screen == .history) {
 
-            var search = text_input.sliceToCursor(&buf);
+        if (displayed_screen == .history) {
+            const search = text_input.sliceToCursor(&buf);
             if (search.len > 0) {
                 const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
                 const actual_search = if (caseInsensitive) search[2..] else search;
-                history = try cmds.searchCommands(alloc, db, actual_search, caseInsensitive);
+                history = try cmds.searchCommands(aa, db, actual_search, caseInsensitive);
             } else {
-                history = try cmds.getCommands(alloc, db, null);
+                history = try cmds.getCommands(aa, db, null);
             }
 
             const search_win = win.child(.{
@@ -86,30 +134,46 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
             for (visible_history, 0..) |cmd, i| {
                 if (y < 0) break;
-
                 const current_item_idx = scroll_offset + i;
+                const is_selected = (current_item_idx == selected_idx);
+
                 var ago_buf: [32]u8 = undefined;
                 var dur_buf: [32]u8 = undefined;
-
                 const diff = now - cmd.last_run_at;
-                const ago_str = if (diff < 60) std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) catch "now" else if (diff < 3600) std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) catch "" else if (diff < 86400) std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) catch "" else std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)}) catch "";
+                
+                const ago_str = if (diff < 60) try std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) else if (diff < 3600) try std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) else if (diff < 86400) try std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) else try std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)});
 
                 const dur_str = if (cmd.last_duration_ms < 1000)
-                    std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms}) catch ""
+                    try std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms})
                 else
-                    std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0}) catch "";
+                    try std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0});
 
-                const line = try std.fmt.allocPrint(arena.allocator(), "{s:>10} │ {s:>8} │ {s}", .{ ago_str, dur_str, cmd.content });
+                // Build line segments
+                var line_segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
+                
+                var base_ago = style_dim;
+                var base_dur = style_dur;
+                var base_sep = style_sep;
+                if (is_selected) {
+                    base_ago.reverse = true;
+                    base_dur.reverse = true;
+                    base_sep.reverse = true;
+                }
 
-                const style: vaxis.Style = if (current_item_idx == selected_idx) .{ .reverse = true } else .{};
+                try line_segments.append(aa, .{ .text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str}), .style = base_ago });
+                try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
+                try line_segments.append(aa, .{ .text = try std.fmt.allocPrint(aa, "{s:>8} ", .{dur_str}), .style = base_dur });
+                try line_segments.append(aa, .{ .text = "│ ", .style = base_sep });
+                
+                const cmd_highlighted = try highlightZsh(aa, cmd.content, is_selected);
+                try line_segments.appendSlice(aa, cmd_highlighted);
 
-                _ = list_win.print(&.{.{ .text = line, .style = style }}, .{ .row_offset = @intCast(y), .col_offset = 0 });
+                _ = list_win.print(line_segments.items, .{ .row_offset = @intCast(y), .col_offset = 0 });
                 y -= 1;
             }
 
             text_input.draw(search_win);
         } else {
-            win.clear();
             const detail_win = win.child(.{
                 .x_off = 4,
                 .y_off = 2,
@@ -117,35 +181,30 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 .height = if (win.height > 6) win.height - 4 else win.height,
                 .border = .{ .where = .all },
             });
-
             const current_cmd = history[@intCast(selected_idx)].content;
-            if (try cmds.getCommandInfo(arena.allocator(), db, current_cmd)) |d| {
+            if (try cmds.getCommandInfo(aa, db, current_cmd)) |d| {
                 var row: u16 = 1;
-                _ = detail_win.print(&.{.{ .text = " COMMAND DETAILS ", .style = .{ .reverse = true } }}, .{ .row_offset = row, .col_offset = 2 });
+                _ = detail_win.print(&.{.{ .text = " COMMAND DETAILS ", .style = .{ .reverse = true, .bold = true } }}, .{ .row_offset = row, .col_offset = 2 });
                 row += 2;
-                
-                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "Content: {s}", .{d.cmd.content}) }}, .{ .row_offset = row, .col_offset = 2 });
+                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "Content: {s}", .{d.cmd.content}) }}, .{ .row_offset = row, .col_offset = 2 });
                 row += 2;
-                
-                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "Runs:     {d}", .{d.cmd.run_count}) }}, .{ .row_offset = row, .col_offset = 2 });
+                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "Runs:     {d}", .{d.cmd.run_count}), .style = style_dur }}, .{ .row_offset = row, .col_offset = 2 });
                 row += 1;
-                
                 const avg = @as(f64, @floatFromInt(d.cmd.total_duration_ms)) / @as(f64, @floatFromInt(@max(1, d.cmd.run_count)));
-                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "Avg Dur:  {d:.2}ms", .{avg}) }}, .{ .row_offset = row, .col_offset = 2 });
+                _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "Avg Dur:  {d:.2}ms", .{avg}), .style = style_dur }}, .{ .row_offset = row, .col_offset = 2 });
                 row += 2;
-                
-                _ = detail_win.print(&.{.{ .text = "EXIT CODE STATS:" }}, .{ .row_offset = row, .col_offset = 2 });
+                _ = detail_win.print(&.{.{ .text = "EXIT CODE STATS:", .style = .{ .bold = true } }}, .{ .row_offset = row, .col_offset = 2 });
                 row += 1;
                 for (d.exit_codes) |ec| {
-                    _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(arena.allocator(), "  Code {d:3} : {d} times", .{ec.exit_code, ec.frequency}) }}, .{ .row_offset = row, .col_offset = 2 });
+                    const ec_style: vaxis.Style = if (ec.exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } };
+                    _ = detail_win.print(&.{.{ .text = try std.fmt.allocPrint(aa, "  Code {d:3} : {d} times", .{ec.exit_code, ec.frequency}), .style = ec_style }}, .{ .row_offset = row, .col_offset = 2 });
                     row += 1;
                 }
-
-                _ = detail_win.print(&.{.{ .text = "Press any key to return", .style = .{ .dim = true } }}, .{ .row_offset = @intCast(detail_win.height - 2), .col_offset = 2 });
+                _ = detail_win.print(&.{.{ .text = "Press ESC to return", .style = style_dim }}, .{ .row_offset = @intCast(detail_win.height - 2), .col_offset = 2 });
             }
         }
+        
         try vx.render(tty.writer());
-
         const event = loop.nextEvent();
 
         switch (event) {
@@ -155,16 +214,12 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 } else if (key.matches(vaxis.Key.up, .{}) and displayed_screen == .history) {
                     if (history.len > 0 and selected_idx < history.len - 1) {
                         selected_idx += 1;
-                        if (selected_idx >= scroll_offset + list_height) {
-                            scroll_offset += 1;
-                        }
+                        if (selected_idx >= scroll_offset + list_height) scroll_offset += 1;
                     }
                 } else if (key.matches(vaxis.Key.down, .{}) and displayed_screen == .history) {
                     if (selected_idx > 0) {
                         selected_idx -= 1;
-                        if (selected_idx < scroll_offset) {
-                            scroll_offset -= 1;
-                        }
+                        if (selected_idx < scroll_offset) scroll_offset -= 1;
                     } else break;
                 } else if (key.matches(vaxis.Key.tab, .{})) {
                     const cmd = history[@intCast(selected_idx)].content;
