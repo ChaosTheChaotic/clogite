@@ -10,6 +10,12 @@ extern fn sqlite3_sqlitezstd_init(
     p_api: ?*c.sqlite3_api_routines,
 ) callconv(.c) c_int;
 
+extern fn sqlite3_regex_init(
+    db: ?*c.sqlite3,
+    pz_err_msg: ?*?[*c]u8,
+    p_api: ?*c.sqlite3_api_routines,
+) callconv(.c) c_int;
+
 pub inline fn getDbPath(alloc: std.mem.Allocator) [:0]const u8 {
     const data_dir = std.fs.getAppDataDir(alloc, program_info.program_name) catch |e| blk: {
         std.log.err("Error getting app data path: {}", .{e});
@@ -145,9 +151,14 @@ pub fn initDb() !sqlite.Db {
     const alloc = std.heap.smp_allocator;
     const db_path = getDbPath(alloc);
 
-    const rc = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
-    if (rc != c.SQLITE_OK) {
-        std.log.err("Failed to register sqlite-zstd auto-extension. SQLite error code: {d}", .{rc});
+    const rcz = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
+    if (rcz != c.SQLITE_OK) {
+        std.log.err("Failed to register sqlite-zstd auto-extension. SQLite error code: {d}", .{rcz});
+        return error.ExtensionRegistrationFailed;
+    }
+    const rcr = c.sqlite3_auto_extension(@ptrCast(&sqlite3_regex_init));
+    if (rcr != c.SQLITE_OK) {
+        std.log.err("Failed to register sqlite-regex auto-extension. SQLite error code: {d}", .{rcr});
         return error.ExtensionRegistrationFailed;
     }
 
