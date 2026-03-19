@@ -140,25 +140,71 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
 pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool) ![]Cmd {
     if (term.len == 0) return getCommands(alloc, db, null);
 
-    if (case_sensitive) {
-        var stmt = try db.prepare(
-            \\SELECT id, content, last_run_at, last_exit_code, 
-            \\last_duration_ms, run_count, total_duration_ms 
-            \\FROM commands WHERE INSTR(content, ?) > 0 
-            \\ORDER BY last_run_at DESC
-        );
-        defer stmt.deinit();
-        return try stmt.all(Cmd, alloc, .{}, .{term});
-    } else {
-        var stmt = try db.prepare(
-            \\SELECT id, content, last_run_at, last_exit_code, 
-            \\last_duration_ms, run_count, total_duration_ms 
-            \\FROM commands WHERE content LIKE ? 
-            \\ORDER BY last_run_at DESC
-        );
-        defer stmt.deinit();
-        const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{term});
-        defer alloc.free(like_term);
-        return try stmt.all(Cmd, alloc, .{}, .{like_term});
+    if (std.mem.startsWith(u8, term, "\\f")) {
+        const literal_term = term[2..];
+        if (literal_term.len == 0) return getCommands(alloc, db, null);
+
+        if (case_sensitive) {
+            var stmt = try db.prepare(
+                \\SELECT id, content, last_run_at, last_exit_code,
+                \\       last_duration_ms, run_count, total_duration_ms
+                \\FROM commands WHERE content LIKE ?
+                \\ORDER BY last_run_at DESC
+            );
+            defer stmt.deinit();
+            const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{literal_term});
+            defer alloc.free(like_term);
+            return try stmt.all(Cmd, alloc, .{}, .{like_term});
+        } else {
+            var stmt = try db.prepare(
+                \\SELECT id, content, last_run_at, last_exit_code,
+                \\       last_duration_ms, run_count, total_duration_ms
+                \\FROM commands WHERE INSTR(content, ?) > 0
+                \\ORDER BY last_run_at DESC
+            );
+            defer stmt.deinit();
+            return try stmt.all(Cmd, alloc, .{}, .{literal_term});
+        }
     }
+
+    const pattern = if (case_sensitive)
+        try std.fmt.allocPrint(alloc, "(?i){s}", .{term})
+    else
+        try alloc.dupe(u8, term);
+    defer alloc.free(pattern);
+
+    // Validate the regex without printing errors to stderr.
+    {
+        const original_stderr = std.os.linux.STDERR_FILENO;
+        const saved_fd = std.os.linux.dup(original_stderr);
+        defer _ =std.os.linux.close(@intCast(saved_fd));
+
+        const null_fd = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .read_write });
+        defer null_fd.close();
+
+        _ = std.os.linux.dup2(null_fd.handle, original_stderr);
+        defer {
+            _ = std.os.linux.dup2(@intCast(saved_fd), original_stderr);
+        }
+
+        var validate_stmt = try db.prepare("SELECT regex(?)");
+        defer validate_stmt.deinit();
+
+        if (validate_stmt.all([]u8, alloc, .{}, .{pattern})) |_| {
+        } else |_| {
+            return &[_]Cmd{};
+        }
+    }
+
+    var stmt = try db.prepare(
+        \\SELECT id, content, last_run_at, last_exit_code,
+        \\       last_duration_ms, run_count, total_duration_ms
+        \\FROM commands WHERE content REGEXP ?
+        \\ORDER BY last_run_at DESC
+    );
+    defer stmt.deinit();
+
+    return stmt.all(Cmd, alloc, .{}, .{pattern}) catch {
+        return &[_]Cmd{};
+    };
 }
