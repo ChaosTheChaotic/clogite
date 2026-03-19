@@ -155,9 +155,25 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
         const search = text_input.sliceToCursor(&buf);
         if (search.len > 0) {
-            const caseInsensitive = std.mem.startsWith(u8, search, "\\c");
-            const actual_search = if (caseInsensitive) search[2..] else search;
-            history = try cmds.searchCommands(aa, db, actual_search, caseInsensitive);
+            var actual_search = search;
+            var caseInsensitive = false;
+            var isRegex = false;
+
+            while (actual_search.len >= 2 and actual_search[0] == '\\') {
+                if (actual_search[1] == 'c') {
+                    caseInsensitive = true;
+                    actual_search = actual_search[2..];
+                } else if (actual_search[1] == 'f') {
+                    isRegex = true;
+                    actual_search = actual_search[2..];
+                } else break;
+            }
+
+            if (isRegex) {
+                history = try cmds.searchCommands(aa, db, actual_search, caseInsensitive);
+            } else {
+                history = try cmds.searchCommands(aa, db, actual_search, caseInsensitive);
+            }
         } else {
             history = try cmds.getCommands(aa, db, null);
         }

@@ -13,4 +13,3 @@ As of now it sadly only supports zsh since I cant figure out how to get bash to 
 - tab to place the command into the next shell prompt (for editing)
 - Prepend \c to use case sensitive search
 - Prepend \f to use plain text search
-- \c used before \f if both
