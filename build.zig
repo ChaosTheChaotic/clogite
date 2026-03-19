@@ -96,6 +96,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.lto = .full;
 
     const zstd_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-zstd" });
     const patch_zstd_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", b.pathJoin(&.{ zstd_path, "Cargo.toml" }) });
@@ -127,7 +128,7 @@ pub fn build(b: *std.Build) void {
         exe,
         "https://github.com/asg017/sqlite-regex",
         &.{ patch_regex_static },
-        false,
+        true,
         null,
         null,
         null,
