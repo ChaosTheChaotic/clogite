@@ -97,7 +97,45 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    installSqliteZstd(b, mod, target, exe);
+    const zstd_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-zstd" });
+    const patch_zstd_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", b.pathJoin(&.{ zstd_path, "Cargo.toml" }) });
+    const patch_zstd_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info/d", b.pathJoin(&.{ zstd_path, "src", "create_extension.rs" }) });
+    
+    const regex_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-regex" });
+    const patch_regex_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type =/crate-type = [\"staticlib\", \"cdylib\"]/", b.pathJoin(&.{ regex_path, "Cargo.toml" }) });
+
+    installRustCrate(
+        b,
+        mod,
+        target,
+        exe,
+        "https://github.com/phiresky/sqlite-zstd",
+        &.{ patch_zstd_static, patch_zstd_log },
+        false,
+        &.{ "gcc_s" },
+        null,
+        &.{ "build_extension" },
+        null,
+    ) catch |e| {
+        std.log.err("Failed to install rust crate: {t}", .{e});
+        return;
+    };
+    installRustCrate(
+        b,
+        mod,
+        target,
+        exe,
+        "https://github.com/asg017/sqlite-regex",
+        &.{ patch_regex_static },
+        false,
+        null,
+        null,
+        null,
+        null,
+    ) catch |e| {
+        std.log.err("Failed to install rust crate: {t}", .{e});
+        return;
+    };
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -171,16 +209,36 @@ pub fn build(b: *std.Build) void {
     // and reading its source code will allow you to master it.
 }
 
-fn installSqliteZstd(
+inline fn repoNameFromUrl(alloc: std.mem.Allocator, url: []const u8) ?[]const u8 {
+    var it = std.mem.splitSequence(u8, url, "/");
+    _ = it.next(); // Skip https
+    _ = it.next(); // Skip //
+    _ = it.next(); // Skip github
+    _ = it.next(); // Skip owner
+
+    const repo = it.next() orelse return null;
+    const clean_repo = if (std.mem.endsWith(u8, repo, ".git")) repo[0 .. repo.len - 4] else repo;
+    return alloc.dupe(u8, clean_repo) catch null;
+}
+
+fn installRustCrate(
     b: *std.Build,
     mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
     exe: *std.Build.Step.Compile,
-) void {
-    const repo_url = "https://github.com/phiresky/sqlite-zstd";
-    const build_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-zstd" });
-    const cargo_toml = b.pathJoin(&.{ build_path, "Cargo.toml" });
-
+    repo_url: []const u8,
+    patches: ?[]const *std.Build.Step.Run,
+    dynamic: bool,
+    extra_system_libs: ?[]const []const u8,
+    relative_cargo_path: ?[]const u8,
+    features: ?[]const []const u8,
+    custom_lib_dir: ?[]const []const u8,
+) !void {
+    const alloc = b.allocator;
+    const name = repoNameFromUrl(alloc, repo_url) orelse repo_url;
+    defer if (std.mem.eql(u8, name, repo_url)) alloc.free(name);
+    const build_path = b.pathJoin(&.{ b.build_root.path.?, "deps", name});
+    const cargo_toml = b.pathJoin(&.{ build_path, relative_cargo_path orelse "Cargo.toml" });
     const check_and_clone = b.addSystemCommand(&.{
         "sh", "-c",
         b.fmt("if [ ! -d {s} ]; then git clone --depth 1 {s} {s}; fi", .{
@@ -188,27 +246,44 @@ fn installSqliteZstd(
         }),
     });
     check_and_clone.has_side_effects = true;
+    const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml });
+    if (features) |f| {
+        for (f) |feature| {
+            cargo_build.addArgs(&.{ "--features", feature });
+        }
+    }
 
-    const patch_cmd_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", cargo_toml });
-    patch_cmd_static.step.dependOn(&check_and_clone.step);
-
-    const patch_cmd_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info/d", b.pathJoin(&.{ build_path, "src", "create_extension.rs" }) });
-    patch_cmd_log.step.dependOn(&check_and_clone.step);
-
-    const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml, "--features", "build_extension" });
-    cargo_build.step.dependOn(&patch_cmd_static.step);
-    cargo_build.step.dependOn(&patch_cmd_log.step);
-
+    if (patches) |p| {
+        for (p) |patch| {
+            patch.step.dependOn(&check_and_clone.step);
+            cargo_build.step.dependOn(&patch.step);
+        }
+    }
     exe.step.dependOn(&cargo_build.step);
 
-    const lib_dir = b.pathJoin(&.{ build_path, "target", "release" });
+    const lib_dir: []const u8 = if (custom_lib_dir) |cld| blk: {
+        const paths = try alloc.alloc([]const u8, cld.len + 1);
+        defer alloc.free(paths);
+
+        paths[0] = build_path;
+        @memcpy(paths[1..], cld);
+
+        break :blk b.pathJoin(paths);
+    } else b.pathJoin(&.{ build_path, "target", "release" });
     mod.addLibraryPath(.{ .cwd_relative = lib_dir });
-    mod.linkSystemLibrary("sqlite_zstd", .{ .preferred_link_mode = .static });
+    const replace_name = try alloc.dupe(u8, name);
+    std.mem.replaceScalar(u8, replace_name, '-', '_');
+    defer alloc.free(replace_name);
+    mod.linkSystemLibrary(replace_name, .{ .preferred_link_mode = if (dynamic) .dynamic else .static});
 
     if (target.result.os.tag != .windows) {
         mod.linkSystemLibrary("pthread", .{});
         mod.linkSystemLibrary("dl", .{});
         mod.linkSystemLibrary("m", .{});
-        mod.linkSystemLibrary("gcc_s", .{});
+        if (extra_system_libs) |esl| {
+            for (esl) |lib| {
+                mod.linkSystemLibrary(lib, .{});
+            }
+        }
     }
 }
