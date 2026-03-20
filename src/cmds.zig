@@ -140,9 +140,8 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
 pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool, regex: bool) ![]Cmd {
     if (term.len == 0) return getCommands(alloc, db, null);
 
-    if (regex) {
-        const literal_term = term[2..];
-        if (literal_term.len == 0) return getCommands(alloc, db, null);
+    if (!regex) {
+        if (term.len == 0) return getCommands(alloc, db, null);
 
         if (case_sensitive) {
             var stmt = try db.prepare(
@@ -152,7 +151,7 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
                 \\ORDER BY last_run_at DESC
             );
             defer stmt.deinit();
-            const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{literal_term});
+            const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{term});
             defer alloc.free(like_term);
             return try stmt.all(Cmd, alloc, .{}, .{like_term});
         } else {
@@ -163,7 +162,7 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
                 \\ORDER BY last_run_at DESC
             );
             defer stmt.deinit();
-            return try stmt.all(Cmd, alloc, .{}, .{literal_term});
+            return try stmt.all(Cmd, alloc, .{}, .{term});
         }
     }
 

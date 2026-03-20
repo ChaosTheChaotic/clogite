@@ -153,18 +153,21 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
         win.clear();
         const list_height = win.height - 3;
 
-        const search = text_input.sliceToCursor(&buf);
+        const search = try std.mem.concat(aa, u8, &.{ 
+            text_input.buf.firstHalf(), 
+            text_input.buf.secondHalf() 
+        });
         if (search.len > 0) {
             var actual_search = search;
             var case_insensitive = false;
-            var regex = false;
+            var regex = true;
 
             while (actual_search.len >= 2 and actual_search[0] == '\\') {
                 if (actual_search[1] == 'c') {
                     case_insensitive = true;
                     actual_search = actual_search[2..];
                 } else if (actual_search[1] == 'f') {
-                    regex = true;
+                    regex = false;
                     actual_search = actual_search[2..];
                 } else break;
             }
