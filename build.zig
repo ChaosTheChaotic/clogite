@@ -7,6 +7,8 @@ const std = @import("std");
 // build runner to parallelize the build automatically (and the cache system to
 // know when a step doesn't need to be re-run).
 pub fn build(b: *std.Build) void {
+    const sqlite_zstd_path = b.option([]const u8, "sqlite-zstd-lib-path", "Path to sqlite-zstd library");
+    const sqlite_regex_path = b.option([]const u8, "sqlite-regex-lib-path", "Path to sqlite-regex library");
     // Standard target options allow the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -105,7 +107,18 @@ pub fn build(b: *std.Build) void {
     const regex_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-regex" });
     const patch_regex_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type =/crate-type = [\"staticlib\", \"cdylib\"]/", b.pathJoin(&.{ regex_path, "Cargo.toml" }) });
 
-    installRustCrate(
+    if (sqlite_zstd_path) |path| {
+        mod.addLibraryPath(.{ .cwd_relative = path });
+        mod.linkSystemLibrary("sqlite_zstd", .{ .preferred_link_mode = .static });
+
+        mod.linkSystemLibrary("gcc_s", .{});
+        if (target.result.os.tag != .windows) {
+            mod.linkSystemLibrary("pthread", .{});
+            mod.linkSystemLibrary("dl", .{});
+            mod.linkSystemLibrary("m", .{});
+        }
+    } else {
+        installRustCrate(
         b,
         mod,
         target,
@@ -118,25 +131,40 @@ pub fn build(b: *std.Build) void {
         &.{ "build_extension" },
         null,
     ) catch |e| {
-        std.log.err("Failed to install rust crate: {t}", .{e});
-        return;
-    };
-    installRustCrate(
+            std.log.err("Failed to install sqlite-zstd rust crate: {any}", .{e});
+            return;
+        };
+    }
+
+    if (sqlite_regex_path) |path| {
+        mod.addLibraryPath(.{ .cwd_relative = path });
+        mod.linkSystemLibrary("sqlite_regex", .{ .preferred_link_mode = .dynamic });
+
+        exe.addRPath(.{ .cwd_relative = regex_path });
+
+        if (target.result.os.tag != .windows) {
+            mod.linkSystemLibrary("pthread", .{});
+            mod.linkSystemLibrary("dl", .{});
+            mod.linkSystemLibrary("m", .{});
+        }
+    } else {
+        installRustCrate(
         b,
         mod,
         target,
         exe,
         "https://github.com/asg017/sqlite-regex",
         &.{ patch_regex_static },
-        true, // We dynamically link as linking 2 rust crates statically fails due to the stuff rust packs in and also I tried and failed to combine them into a crate
+        true, // As I cannot find a way to reliably and correctly statically link 2 rust libraries due to their stdlib bundling method
         null,
         null,
         null,
         null,
     ) catch |e| {
-        std.log.err("Failed to install rust crate: {t}", .{e});
-        return;
-    };
+            std.log.err("Failed to install sqlite-regex rust crate: {any}", .{e});
+            return;
+        };
+    }
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default

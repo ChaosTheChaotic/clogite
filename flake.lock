@@ -18,7 +18,41 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "sqlite-regex": "sqlite-regex",
+        "sqlite-zstd": "sqlite-zstd"
+      }
+    },
+    "sqlite-regex": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1696642011,
+        "narHash": "sha256-BIG7TxnGJDhoHrAfqgIwuboC6RUC2LdwSwpHslXVDXY=",
+        "owner": "asg017",
+        "repo": "sqlite-regex",
+        "rev": "5fe28e3c7a978c621082cfef0ae6dea9a71167ee",
+        "type": "github"
+      },
+      "original": {
+        "owner": "asg017",
+        "repo": "sqlite-regex",
+        "type": "github"
+      }
+    },
+    "sqlite-zstd": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1751274260,
+        "narHash": "sha256-ObV5+g3Yp5EkkekiqTdS8al8/t0MnpTlD36SPHRh11A=",
+        "owner": "phiresky",
+        "repo": "sqlite-zstd",
+        "rev": "212b179a266f0fef68b2eedd1014bb81c4596f2a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "phiresky",
+        "repo": "sqlite-zstd",
+        "type": "github"
       }
     }
   },
