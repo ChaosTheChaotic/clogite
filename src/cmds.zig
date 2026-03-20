@@ -137,10 +137,10 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
     };
 }
 
-pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool) ![]Cmd {
+pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool, regex: bool) ![]Cmd {
     if (term.len == 0) return getCommands(alloc, db, null);
 
-    if (std.mem.startsWith(u8, term, "\\f")) {
+    if (regex) {
         const literal_term = term[2..];
         if (literal_term.len == 0) return getCommands(alloc, db, null);
 
