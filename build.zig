@@ -128,7 +128,7 @@ pub fn build(b: *std.Build) void {
         exe,
         "https://github.com/asg017/sqlite-regex",
         &.{ patch_regex_static },
-        true,
+        true, // We dynamically link as linking 2 rust crates statically fails due to the stuff rust packs in and also I tried and failed to combine them into a crate
         null,
         null,
         null,

@@ -176,7 +176,7 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
     {
         const original_stderr = std.os.linux.STDERR_FILENO;
         const saved_fd = std.os.linux.dup(original_stderr);
-        defer _ =std.os.linux.close(@intCast(saved_fd));
+        defer _ = std.os.linux.close(@intCast(saved_fd));
 
         const null_fd = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .read_write });
         defer null_fd.close();
@@ -189,8 +189,7 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
         var validate_stmt = try db.prepare("SELECT regex(?)");
         defer validate_stmt.deinit();
 
-        if (validate_stmt.all([]u8, alloc, .{}, .{pattern})) |_| {
-        } else |_| {
+        if (validate_stmt.all([]u8, alloc, .{}, .{pattern})) |_| {} else |_| {
             return &[_]Cmd{};
         }
     }
