@@ -138,8 +138,23 @@ pub fn main() !void {
                     \\__clogite_history_widget() {
                     \\    local selected="$(clogite view)"
                     \\    if [[ -n "$selected" ]]; then
-                    \\        BUFFER="$selected"
-                    \\        CURSOR=$#BUFFER
+                    \\        local mode="${selected[1]}"
+                    \\        local cmd="${selected[2,-1]}"
+                    \\        case "$mode" in
+                    \\            $'\x1E')
+                    \\                BUFFER="$cmd"
+                    \\                CURSOR=$#BUFFER
+                    \\                zle accept-line
+                    \\                ;;
+                    \\            $'\x1F')
+                    \\                BUFFER="$cmd"
+                    \\                CURSOR=$#BUFFER
+                    \\                ;;
+                    \\            *)         # Fallback (shouldnt happen)
+                    \\                BUFFER="$selected"
+                    \\                CURSOR=$#BUFFER
+                    \\                ;;
+                    \\        esac
                     \\    fi
                     \\    zle reset-prompt
                     \\}
