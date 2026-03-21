@@ -377,10 +377,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                     if (history.len > 0 and selected_idx < history.len - 1) selected_idx += 1;
                 } else if (key.matches(vaxis.Key.down, .{}) and displayed_screen == .history) {
                     if (selected_idx > 0) selected_idx -= 1 else break;
-                } else if (key.matches(vaxis.Key.tab, .{})) {
-                    const cmd = history[@intCast(selected_idx)].content;
-                    return try std.fmt.allocPrint(alloc, "print -z '{s}'", .{cmd});
-                } else if (key.matches(vaxis.Key.enter, .{})) {
+                } else if (key.matches(vaxis.Key.enter, .{}) or key.matches(vaxis.Key.tab, .{})) {
                     const cmd = history[@intCast(selected_idx)].content;
                     return try alloc.dupe(u8, cmd);
                 } else if (key.matches('d', .{ .ctrl = true })) {

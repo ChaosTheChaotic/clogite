@@ -136,7 +136,6 @@ pub fn main() !void {
                     \\}
                     \\
                     \\__clogite_history_widget() {
-                    \\    # Run the view TUI and capture the selected command
                     \\    local selected="$(clogite view)"
                     \\    if [[ -n "$selected" ]]; then
                     \\        BUFFER="$selected"
