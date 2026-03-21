@@ -143,8 +143,8 @@ pub fn main() !void {
                     \\add-zsh-hook precmd __clogite_precmd
                     \\
                     \\# Bind Up Arrow to clear the line (^U) and run the view UI
-                    \\bindkey -s '^[[A' '^Ueval $(clogite view)\n'
-                    \\bindkey -s '^[OA' '^Ueval $(clogite view)\n'
+                    \\bindkey -s '^[[A' '^Ueval "$(clogite view)"\n'
+                    \\bindkey -s '^[OA' '^Ueval "$(clogite view)"\n'
                 ;
                 var stdout = std.fs.File.stdout().writer(&.{});
 
