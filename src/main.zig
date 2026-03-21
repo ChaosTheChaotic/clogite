@@ -128,23 +128,30 @@ pub fn main() !void {
                     \\    local exit_code=$?
                     \\    if [[ -n "$__clogite_start" && -n "$__clogite_cmd" ]]; then
                     \\        local duration_ms=$(( (EPOCHREALTIME - __clogite_start) * 1000 ))
-                    \\        # Truncate fractional milliseconds
                     \\        duration_ms=${duration_ms%.*}
-                    \\        
-                    \\        # Run asynchronously so prompt isn't delayed
                     \\        clogite add "$__clogite_cmd" $exit_code $duration_ms &|
                     \\    fi
                     \\    __clogite_start=
                     \\    __clogite_cmd=
                     \\}
                     \\
+                    \\__clogite_history_widget() {
+                    \\    # Run the view TUI and capture the selected command
+                    \\    local selected="$(clogite view)"
+                    \\    if [[ -n "$selected" ]]; then
+                    \\        BUFFER="$selected"
+                    \\        CURSOR=$#BUFFER
+                    \\    fi
+                    \\    zle reset-prompt
+                    \\}
+                    \\
                     \\autoload -Uz add-zsh-hook
                     \\add-zsh-hook preexec __clogite_preexec
                     \\add-zsh-hook precmd __clogite_precmd
                     \\
-                    \\# Bind Up Arrow to clear the line (^U) and run the view UI
-                    \\bindkey -s '^[[A' '^Ueval "$(clogite view)"\n'
-                    \\bindkey -s '^[OA' '^Ueval "$(clogite view)"\n'
+                    \\zle -N __clogite_history_widget
+                    \\bindkey '\e[A' __clogite_history_widget
+                    \\bindkey '\eOA' __clogite_history_widget
                 ;
                 var stdout = std.fs.File.stdout().writer(&.{});
 
