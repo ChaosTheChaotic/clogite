@@ -23,8 +23,8 @@ const Screen = enum {
     info,
 };
 
-fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize) ![]const []const vaxis.Cell.Segment {
-    const cmd_highlighted = try highlightZsh(alloc, content, is_selected);
+fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize, search_term: []const u8, case_insensitive: bool) ![]const []const vaxis.Cell.Segment {
+    const cmd_highlighted = try highlightZsh(alloc, content, is_selected, search_term, case_insensitive);
 
     var wrapped_lines: std.ArrayList([]const vaxis.Cell.Segment) = .empty;
     var current_line: std.ArrayList(vaxis.Cell.Segment) = .empty;
@@ -74,36 +74,78 @@ fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool,
     return try wrapped_lines.toOwnedSlice(alloc);
 }
 
-fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: bool) ![]vaxis.Cell.Segment {
-    var segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
-    errdefer segments.deinit(allocator);
-
+fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: bool, search_term: []const u8, case_insensitive: bool) ![]vaxis.Cell.Segment {
     const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
+
+    const styles = try allocator.alloc(vaxis.Style, content.len);
+    defer allocator.free(styles);
+    @memset(styles, .{ .bg = sel_bg });
 
     var tokens = std.mem.tokenizeAny(u8, content, " ");
     var is_first = true;
 
     while (tokens.next()) |token| {
-        if (!is_first) {
-            try segments.append(allocator, .{ .text = " ", .style = .{ .bg = sel_bg } });
+        const start = @intFromPtr(token.ptr) - @intFromPtr(content.ptr);
+        var style: vaxis.Style = .{ .bg = sel_bg };
+
+        if (is_first) {
+            style.fg = .{ .index = @intFromEnum(Colors.green) };
+            style.bold = true;
+        } else if (std.mem.startsWith(u8, token, "-")) {
+            style.fg = .{ .index = @intFromEnum(Colors.cyan) };
+        } else if (std.mem.startsWith(u8, token, "\"") or std.mem.startsWith(u8, token, "'")) {
+            style.fg = .{ .index = @intFromEnum(Colors.yellow) };
+        } else if (std.mem.startsWith(u8, token, "$")) {
+            style.fg = .{ .index = @intFromEnum(Colors.magenta) };
         }
 
-        var style: vaxis.Style = blk: {
-            if (is_first) {
-                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.green) }, .bold = true };
-            } else if (std.mem.startsWith(u8, token, "-")) {
-                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.cyan) } };
-            } else if (std.mem.startsWith(u8, token, "\"") or std.mem.startsWith(u8, token, "'")) {
-                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.yellow) } };
-            } else if (std.mem.startsWith(u8, token, "$")) {
-                break :blk .{ .fg = .{ .index = @intFromEnum(Colors.magenta) } };
-            }
-            break :blk .{};
-        };
-
-        style.bg = sel_bg;
-        try segments.append(allocator, .{ .text = token, .style = style });
+        for (styles[start .. start + token.len]) |*s| {
+            s.* = style;
+        }
         is_first = false;
+    }
+
+    if (search_term.len > 0) {
+        var i: usize = 0;
+        while (i < content.len) {
+            const slice = content[i..];
+            const match_offset = if (case_insensitive)
+                std.ascii.indexOfIgnoreCase(slice, search_term)
+            else
+                std.mem.indexOf(u8, slice, search_term);
+
+            if (match_offset) |offset| {
+                const idx = i + offset;
+                for (styles[idx .. idx + search_term.len]) |*s| {
+                    s.reverse = true;
+                }
+                i = idx + search_term.len;
+            } else {
+                break;
+            }
+        }
+    }
+
+    var segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
+    errdefer segments.deinit(allocator);
+
+    if (content.len > 0) {
+        var current_style = styles[0];
+        var start_idx: usize = 0;
+        for (styles, 0..) |s, i| {
+            if (!std.meta.eql(s, current_style)) {
+                try segments.append(allocator, .{
+                    .text = content[start_idx..i],
+                    .style = current_style,
+                });
+                current_style = s;
+                start_idx = i;
+            }
+        }
+        try segments.append(allocator, .{
+            .text = content[start_idx..],
+            .style = current_style,
+        });
     }
 
     return try segments.toOwnedSlice(allocator);
@@ -154,9 +196,12 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
         const list_height = win.height - 3;
 
         const search = try std.mem.concat(aa, u8, &.{ text_input.buf.firstHalf(), text_input.buf.secondHalf() });
+
+        var actual_search: []const u8 = "";
+        var case_insensitive = false;
+
         if (search.len > 0) {
-            var actual_search = search;
-            var case_insensitive = false;
+            actual_search = search;
             var regex = true;
 
             while (actual_search.len >= 2 and actual_search[0] == '\\') {
@@ -205,7 +250,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                     var total_lines: usize = 0;
                     var i: usize = @intCast(selected_idx);
                     while (true) {
-                        const wrapped = try wrapCommand(aa, history[i].content, false, cmd_max_width);
+                        const wrapped = try wrapCommand(aa, history[i].content, false, cmd_max_width, actual_search, case_insensitive);
                         total_lines += wrapped.len;
 
                         if (total_lines > list_height) {
@@ -258,7 +303,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 const ago_text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str});
                 const dur_text = try std.fmt.allocPrint(aa, "{s:>8} ", .{dur_str});
 
-                const wrapped = try wrapCommand(aa, cmd.content, is_selected, cmd_max_width);
+                const wrapped = try wrapCommand(aa, cmd.content, is_selected, cmd_max_width, actual_search, case_insensitive);
                 const lines_count = wrapped.len;
 
                 for (wrapped, 0..) |line_segs, l| {
@@ -317,7 +362,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 row += 1;
 
                 const cmd_width = if (detail_win.width > margin * 2) detail_win.width - (margin * 2) else 1;
-                const wrapped = try wrapCommand(aa, d.cmd.content, false, cmd_width);
+                const wrapped = try wrapCommand(aa, d.cmd.content, false, cmd_width, actual_search, case_insensitive);
                 for (wrapped) |line_segs| {
                     if (row >= detail_win.height - 1) break;
                     _ = detail_win.print(line_segs, .{ .row_offset = @intCast(row), .col_offset = margin });
