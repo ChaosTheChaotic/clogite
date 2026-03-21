@@ -234,8 +234,10 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 .border = .{ .where = .all },
             });
 
+            const usable_height = if (list_win.height > 2) list_win.height - 2 else 0;
+
             const now = std.time.timestamp();
-            var y: i32 = @as(i32, @intCast(list_win.height)) - 1;
+            var y: i32 = @as(i32, @intCast(list_win.height)) - 2;
 
             const prefix_width: usize = 24; // ago (11) + sep (2) + dur (9) + sep (2)
             const cmd_max_width: usize = if (list_win.width > prefix_width) list_win.width - prefix_width else 1;
@@ -244,34 +246,27 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 if (selected_idx >= @as(i64, @intCast(history.len))) {
                     selected_idx = @as(i64, @intCast(history.len)) - 1;
                 }
+                if (selected_idx < 0) selected_idx = 0;
+
                 if (selected_idx < scroll_offset) {
                     scroll_offset = @intCast(selected_idx);
                 } else {
-                    var total_lines: usize = 0;
-                    var i: usize = @intCast(selected_idx);
-                    while (true) {
-                        const wrapped = try wrapCommand(aa, history[i].content, false, cmd_max_width, actual_search, case_insensitive);
-                        total_lines += wrapped.len;
+                    var total_lines_to_selection: usize = 0;
+                    for (history[scroll_offset..@intCast(selected_idx + 1)]) |item| {
+                        const wrapped = try wrapCommand(aa, item.content, false, cmd_max_width, actual_search, case_insensitive);
+                        total_lines_to_selection += wrapped.len;
+                    }
 
-                        if (total_lines > list_height) {
-                            if (i == @as(usize, @intCast(selected_idx))) {
-                                scroll_offset = i;
-                            } else {
-                                scroll_offset = i + 1;
-                            }
-                            break;
-                        }
-                        if (i == 0) {
-                            scroll_offset = 0;
-                            break;
-                        }
-                        i -= 1;
+                    while (total_lines_to_selection > usable_height and scroll_offset < @as(usize, @intCast(selected_idx))) {
+                        const top_wrapped = try wrapCommand(aa, history[scroll_offset].content, false, cmd_max_width, actual_search, case_insensitive);
+                        total_lines_to_selection -= top_wrapped.len;
+                        scroll_offset += 1;
                     }
                 }
             }
 
             for (history[scroll_offset..], 0..) |cmd, i| {
-                if (y < 0) break;
+                if (y < 1) break;
 
                 const current_item_idx = scroll_offset + i;
                 const is_selected = (current_item_idx == selected_idx);
