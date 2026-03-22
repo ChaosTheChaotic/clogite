@@ -23,6 +23,44 @@ const Screen = enum {
     info,
 };
 
+fn formatAgo(alloc: std.mem.Allocator, timestamp: i64) ![]const u8 {
+    const diff = std.time.timestamp() - timestamp;
+    if (diff < 60)
+        return try std.fmt.allocPrint(alloc, "{d}s ago", .{diff})
+    else if (diff < 3600)
+        return try std.fmt.allocPrint(alloc, "{d}m ago", .{@divTrunc(diff, 60)})
+    else if (diff < 86400)
+        return try std.fmt.allocPrint(alloc, "{d}h ago", .{@divTrunc(diff, 3600)})
+    else if (diff < 31536000)
+        return try std.fmt.allocPrint(alloc, "{d}d ago", .{@divTrunc(diff, 86400)})
+    else
+        return try std.fmt.allocPrint(alloc, "{d}y ago", .{@divTrunc(diff, 31536000)});
+}
+
+fn formatDuration(alloc: std.mem.Allocator, duration_ms: i64) ![]const u8 {
+    if (duration_ms < 1000) {
+        return try std.fmt.allocPrint(alloc, "{d}ms", .{duration_ms});
+    }
+
+    const total_s = @divTrunc(duration_ms, 1000);
+    
+    if (total_s < 60) return try std.fmt.allocPrint(alloc, "{d:.2}s", .{@as(f64, @floatFromInt(duration_ms)) / 1000.0});
+
+    const s = @rem(total_s, 60);
+    const total_m = @divTrunc(total_s, 60);
+    
+    if (total_m < 60) return try std.fmt.allocPrint(alloc, "{d}m {d}s", .{ total_m, s });
+
+    const m = @rem(total_m, 60);
+    const total_h = @divTrunc(total_m, 60);
+    
+    if (total_h < 24) return try std.fmt.allocPrint(alloc, "{d}h {d}m", .{ total_h, m });
+
+    const h = @rem(total_h, 24);
+    const d = @divTrunc(total_h, 24);
+    return try std.fmt.allocPrint(alloc, "{d}d {d}h", .{ d, h });
+}
+
 fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize, search_term: []const u8, case_insensitive: bool) ![]const []const vaxis.Cell.Segment {
     const cmd_highlighted = try highlightZsh(alloc, content, is_selected, search_term, case_insensitive);
 
@@ -295,7 +333,6 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
             const usable_height = if (list_win.height > 2) list_win.height - 2 else 0;
 
-            const now = std.time.timestamp();
             var y: i32 = @as(i32, @intCast(list_win.height)) - 2;
 
             const prefix_width: usize = 24; // ago (11) + sep (2) + dur (9) + sep (2)
@@ -331,14 +368,8 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 const is_selected = (current_item_idx == selected_idx);
                 const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
 
-                var ago_buf: [32]u8 = undefined;
-                var dur_buf: [32]u8 = undefined;
-                const diff = now - cmd.last_run_at;
-                const ago_str = if (diff < 60) try std.fmt.bufPrint(&ago_buf, "{d}s ago", .{diff}) else if (diff < 3600) try std.fmt.bufPrint(&ago_buf, "{d}m ago", .{@divTrunc(diff, 60)}) else if (diff < 86400) try std.fmt.bufPrint(&ago_buf, "{d}h ago", .{@divTrunc(diff, 3600)}) else try std.fmt.bufPrint(&ago_buf, "{d}d ago", .{@divTrunc(diff, 86400)});
-                const dur_str = if (cmd.last_duration_ms < 1000)
-                    try std.fmt.bufPrint(&dur_buf, "{d}ms", .{cmd.last_duration_ms})
-                else
-                    try std.fmt.bufPrint(&dur_buf, "{d:.2}s", .{@as(f64, @floatFromInt(cmd.last_duration_ms)) / 1000.0});
+                const ago_str = try formatAgo(aa, cmd.last_run_at);
+                const dur_str = try formatDuration(aa, cmd.last_duration_ms);
 
                 var base_ago = style_dim;
                 var base_dur = style_dur;
@@ -428,14 +459,17 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
                 const stats_labels = [_][]const u8{ "Run Count", "Total Time", "Avg Time", "Last Run" };
 
-                const avg_dur = if (d.cmd.run_count > 0) @divFloor(d.cmd.total_duration_ms, @as(u16, @intCast(d.cmd.run_count))) else 0;
+                const avg_dur = if (d.cmd.run_count > 0) @divTrunc(d.cmd.total_duration_ms, d.cmd.run_count) else 0;
 
-                var time_buf: [64]u8 = undefined;
+                const ago_str = try formatAgo(aa, d.cmd.last_run_at);
+                const total_dur_str = try formatDuration(aa, d.cmd.total_duration_ms);
+                const avg_dur_str = try formatDuration(aa, avg_dur);
+
                 const stats_values = [_][]const u8{
                     try std.fmt.allocPrint(aa, "{d}", .{d.cmd.run_count}),
-                    try std.fmt.bufPrint(&time_buf, "{d}ms", .{d.cmd.total_duration_ms}),
-                    try std.fmt.allocPrint(aa, "{d}ms", .{avg_dur}),
-                    try std.fmt.allocPrint(aa, "{d}s ago", .{std.time.timestamp() - d.cmd.last_run_at}),
+                    total_dur_str,
+                    avg_dur_str,
+                    ago_str,
                 };
 
                 for (stats_labels, stats_values) |label, val| {
