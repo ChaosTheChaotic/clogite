@@ -76,53 +76,118 @@ fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool,
 
 fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: bool, search_term: []const u8, case_insensitive: bool) ![]vaxis.Cell.Segment {
     const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
-
     const styles = try allocator.alloc(vaxis.Style, content.len);
     defer allocator.free(styles);
     @memset(styles, .{ .bg = sel_bg });
 
-    var tokens = std.mem.tokenizeAny(u8, content, " ");
-    var is_first = true;
+    var i: usize = 0;
+    var is_first_token = true;
 
-    while (tokens.next()) |token| {
-        const start = @intFromPtr(token.ptr) - @intFromPtr(content.ptr);
+    while (i < content.len) {
+        while (i < content.len and std.ascii.isWhitespace(content[i])) : (i += 1) {}
+        if (i >= content.len) break;
+
+        const start = i;
+        var len: usize = 0;
         var style: vaxis.Style = .{ .bg = sel_bg };
 
-        if (is_first) {
-            style.fg = .{ .index = @intFromEnum(Colors.green) };
-            style.bold = true;
-        } else if (std.mem.startsWith(u8, token, "-")) {
+        if (content[i] == '-' and !is_first_token) {
             style.fg = .{ .index = @intFromEnum(Colors.cyan) };
-        } else if (std.mem.startsWith(u8, token, "\"") or std.mem.startsWith(u8, token, "'")) {
+            while (i + len < content.len and !std.ascii.isWhitespace(content[i + len])) : (len += 1) {}
+        } else if (content[i] == '"' or content[i] == '\'') {
             style.fg = .{ .index = @intFromEnum(Colors.yellow) };
-        } else if (std.mem.startsWith(u8, token, "$")) {
-            style.fg = .{ .index = @intFromEnum(Colors.magenta) };
+            const quote = content[i];
+            len = 1;
+            while (i + len < content.len) : (len += 1) {
+                if (content[i + len] == '\\' and i + len + 1 < content.len) {
+                    len += 1; // Skip escaped char
+                } else if (content[i + len] == quote) {
+                    len += 1;
+                    break;
+                }
+            }
+        } else {
+            if (is_first_token) {
+                style.fg = .{ .index = @intFromEnum(Colors.green) };
+                style.bold = true;
+            }
+            while (i + len < content.len and !std.ascii.isWhitespace(content[i + len])) : (len += 1) {}
         }
 
-        for (styles[start .. start + token.len]) |*s| {
-            s.* = style;
-        }
-        is_first = false;
+        for (styles[start .. start + len]) |*s| s.* = style;
+        i += len;
+        is_first_token = false;
     }
 
+    i = 0;
+    while (i < content.len) {
+        var len: usize = 0;
+        if (content[i] == '\\') {
+            i += 2;
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, content[i..], "${")) {
+            var in_quote: ?u8 = null;
+            for (content[i..], 0..) |char, j| {
+                if (char == '\\' and j + 1 < content[i..].len) continue;
+                if (in_quote) |q| {
+                    if (char == q) in_quote = null;
+                } else if (char == '"' or char == '\'') {
+                    in_quote = char;
+                } else if (char == '}') {
+                    len = j + 1;
+                    break;
+                }
+            }
+        } else if (std.mem.startsWith(u8, content[i..], "$(") or std.mem.startsWith(u8, content[i..], "<(")) {
+            var depth: usize = 0;
+            var in_quote: ?u8 = null;
+            for (content[i..], 0..) |char, j| {
+                if (char == '\\' and j + 1 < content[i..].len) continue;
+                if (in_quote) |q| {
+                    if (char == q) in_quote = null;
+                } else if (char == '"' or char == '\'') {
+                    in_quote = char;
+                } else if (char == '(') {
+                    depth += 1;
+                } else if (char == ')') {
+                    depth -= 1;
+                    if (depth == 0) {
+                        len = j + 1;
+                        break;
+                    }
+                }
+            }
+        } else if (content[i] == '$') {
+            len = 1;
+            while (i + len < content.len) : (len += 1) {
+                const c = content[i + len];
+                if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '?' and c != '!' and c != '*' and c != '@' and c != '#') break;
+            }
+        }
+
+        if (len > 0) {
+            for (styles[i .. i + len]) |*s| s.fg = .{ .index = @intFromEnum(Colors.magenta) };
+            i += len;
+        } else {
+            i += 1;
+        }
+    }
     if (search_term.len > 0) {
-        var i: usize = 0;
-        while (i < content.len) {
-            const slice = content[i..];
+        var s_idx: usize = 0;
+        while (s_idx < content.len) {
+            const slice = content[s_idx..];
             const match_offset = if (case_insensitive)
                 std.ascii.indexOfIgnoreCase(slice, search_term)
             else
                 std.mem.indexOf(u8, slice, search_term);
 
             if (match_offset) |offset| {
-                const idx = i + offset;
-                for (styles[idx .. idx + search_term.len]) |*s| {
-                    s.reverse = true;
-                }
-                i = idx + search_term.len;
-            } else {
-                break;
-            }
+                const idx = s_idx + offset;
+                for (styles[idx .. idx + search_term.len]) |*s| s.reverse = true;
+                s_idx = idx + search_term.len;
+            } else break;
         }
     }
 
@@ -132,20 +197,14 @@ fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: 
     if (content.len > 0) {
         var current_style = styles[0];
         var start_idx: usize = 0;
-        for (styles, 0..) |s, i| {
+        for (styles, 0..) |s, j| {
             if (!std.meta.eql(s, current_style)) {
-                try segments.append(allocator, .{
-                    .text = content[start_idx..i],
-                    .style = current_style,
-                });
+                try segments.append(allocator, .{ .text = content[start_idx..j], .style = current_style });
                 current_style = s;
-                start_idx = i;
+                start_idx = j;
             }
         }
-        try segments.append(allocator, .{
-            .text = content[start_idx..],
-            .style = current_style,
-        });
+        try segments.append(allocator, .{ .text = content[start_idx..], .style = current_style });
     }
 
     return try segments.toOwnedSlice(allocator);
@@ -347,62 +406,60 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
             const current_cmd = history[@intCast(selected_idx)].content;
             if (try cmds.getCommandInfo(aa, db, current_cmd)) |d| {
-                var row: i32 = 1;
+                var row: u16 = 1;
                 const margin: u16 = 2;
 
-                _ = detail_win.print(&.{.{ .text = " COMMAND DETAILS ", .style = .{ .reverse = true, .bold = true } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
-                row += 2;
+                _ = detail_win.print(&.{
+                    .{ .text = "COMMAND DETAILS ", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.green) } } },
+                }, .{ .row_offset = 0, .col_offset = 2 });
 
-                _ = detail_win.print(&.{.{ .text = "COMMAND:", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.cyan) } } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
+                _ = detail_win.print(&.{.{ .text = "Command:", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
                 row += 1;
 
-                const cmd_width = if (detail_win.width > margin * 2) detail_win.width - (margin * 2) else 1;
-                const wrapped = try wrapCommand(aa, d.cmd.content, false, cmd_width, actual_search, case_insensitive);
-                for (wrapped) |line_segs| {
-                    if (row >= detail_win.height - 1) break;
-                    _ = detail_win.print(line_segs, .{ .row_offset = @intCast(row), .col_offset = margin });
+                const cmd_wrapped = try wrapCommand(aa, d.cmd.content, false, detail_win.width - (margin * 2), "", false);
+                for (cmd_wrapped) |line| {
+                    _ = detail_win.print(line, .{ .row_offset = row, .col_offset = margin + 1 });
                     row += 1;
                 }
                 row += 1;
 
-                if (row < detail_win.height - 1) {
-                    _ = detail_win.print(&.{.{ .text = "STATISTICS:", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.cyan) } } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
+                _ = detail_win.print(&.{.{ .text = "Statistics:", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
+                row += 1;
+
+                const stats_labels = [_][]const u8{ "Run Count", "Total Time", "Avg Time", "Last Run" };
+
+                const avg_dur = if (d.cmd.run_count > 0) @divFloor(d.cmd.total_duration_ms, @as(u16, @intCast(d.cmd.run_count))) else 0;
+
+                var time_buf: [64]u8 = undefined;
+                const stats_values = [_][]const u8{
+                    try std.fmt.allocPrint(aa, "{d}", .{d.cmd.run_count}),
+                    try std.fmt.bufPrint(&time_buf, "{d}ms", .{d.cmd.total_duration_ms}),
+                    try std.fmt.allocPrint(aa, "{d}ms", .{avg_dur}),
+                    try std.fmt.allocPrint(aa, "{d}s ago", .{std.time.timestamp() - d.cmd.last_run_at}),
+                };
+
+                for (stats_labels, stats_values) |label, val| {
+                    _ = detail_win.print(&.{
+                        .{ .text = try std.fmt.allocPrint(aa, "  {s: <12} ", .{label}), .style = style_sep },
+                        .{ .text = val, .style = .{ .fg = .{ .index = @intFromEnum(Colors.cyan) } } },
+                    }, .{ .row_offset = row, .col_offset = margin });
                     row += 1;
-
-                    const avg_dur = @as(f64, @floatFromInt(d.cmd.total_duration_ms)) / @as(f64, @floatFromInt(@max(1, d.cmd.run_count)));
-
-                    const stats = [_]struct { label: []const u8, value: []const u8, style: vaxis.Style }{
-                        .{ .label = "Total Runs:     ", .value = try std.fmt.allocPrint(aa, "{d}", .{d.cmd.run_count}), .style = .{} },
-                        .{ .label = "Avg Duration:   ", .value = try std.fmt.allocPrint(aa, "{d:.2}ms", .{avg_dur}), .style = style_dur },
-                        .{ .label = "Last Exit Code: ", .value = try std.fmt.allocPrint(aa, "{d}", .{d.cmd.last_exit_code}), .style = if (d.cmd.last_exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } } },
-                    };
-
-                    for (stats) |stat| {
-                        if (row >= detail_win.height - 1) break;
-                        var line: std.ArrayList(vaxis.Cell.Segment) = .empty;
-                        try line.append(aa, .{ .text = stat.label, .style = style_dim });
-                        try line.append(aa, .{ .text = stat.value, .style = stat.style });
-                        _ = detail_win.print(line.items, .{ .row_offset = @intCast(row), .col_offset = margin });
-                        row += 1;
-                    }
                 }
                 row += 1;
 
-                if (row < detail_win.height - 2) {
-                    _ = detail_win.print(&.{.{ .text = "EXIT CODE FREQUENCY:", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.cyan) } } }}, .{ .row_offset = @intCast(row), .col_offset = margin });
+                _ = detail_win.print(&.{.{ .text = "Exit Codes (Frequency):", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
+                row += 1;
+
+                for (d.exit_codes) |stat| {
+                    const code_color: Colors = if (stat.exit_code == 0) .green else .yellow;
+                    _ = detail_win.print(&.{
+                        .{ .text = "  Code ", .style = style_sep },
+                        .{ .text = try std.fmt.allocPrint(aa, "{d: >3}", .{stat.exit_code}), .style = .{ .fg = .{ .index = @intFromEnum(code_color) } } },
+                        .{ .text = " : ", .style = style_sep },
+                        .{ .text = try std.fmt.allocPrint(aa, "{d}", .{stat.frequency}), .style = .{} },
+                    }, .{ .row_offset = row, .col_offset = margin });
                     row += 1;
-
-                    for (d.exit_codes) |ec| {
-                        if (row >= detail_win.height - 2) break;
-                        const ec_style: vaxis.Style = if (ec.exit_code == 0) .{ .fg = .{ .index = 2 } } else .{ .fg = .{ .index = 1 } };
-                        const ec_text = try std.fmt.allocPrint(aa, "  Code {d:3} : {d} times", .{ ec.exit_code, ec.frequency });
-                        _ = detail_win.print(&.{.{ .text = ec_text, .style = ec_style }}, .{ .row_offset = @intCast(row), .col_offset = margin });
-                        row += 1;
-                    }
                 }
-
-                const footer_style = style_dim;
-                _ = detail_win.print(&.{.{ .text = " [ESC] Back ", .style = footer_style }}, .{ .row_offset = @intCast(detail_win.height - 1), .col_offset = margin });
             }
         }
 
