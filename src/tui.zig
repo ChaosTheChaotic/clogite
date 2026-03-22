@@ -43,17 +43,17 @@ fn formatDuration(alloc: std.mem.Allocator, duration_ms: i64) ![]const u8 {
     }
 
     const total_s = @divTrunc(duration_ms, 1000);
-    
+
     if (total_s < 60) return try std.fmt.allocPrint(alloc, "{d:.2}s", .{@as(f64, @floatFromInt(duration_ms)) / 1000.0});
 
     const s = @rem(total_s, 60);
     const total_m = @divTrunc(total_s, 60);
-    
+
     if (total_m < 60) return try std.fmt.allocPrint(alloc, "{d}m {d}s", .{ total_m, s });
 
     const m = @rem(total_m, 60);
     const total_h = @divTrunc(total_m, 60);
-    
+
     if (total_h < 24) return try std.fmt.allocPrint(alloc, "{d}h {d}m", .{ total_h, m });
 
     const h = @rem(total_h, 24);
