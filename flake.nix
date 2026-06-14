@@ -13,40 +13,53 @@
     };
   };
 
-  outputs = { self, nixpkgs, sqlite-zstd, sqlite-regex }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      sqlite-zstd,
+      sqlite-regex,
+    }:
     let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-    in {
-      packages = forAllSystems (system:
+    in
+    {
+      packages = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
 
-	  zig-deps = pkgs.callPackage ./deps.nix { };
+          zig-deps = pkgs.callPackage ./deps.nix { };
 
           sqlite-zstd-lib = pkgs.rustPlatform.buildRustPackage {
             pname = "sqlite-zstd";
             version = "git";
             src = sqlite-zstd;
-            
+
             cargoLock = {
               lockFile = "${sqlite-zstd}/Cargo.lock";
               allowBuiltinFetchGit = true;
             };
 
-	    doCheck = false;
+            doCheck = false;
 
-	    nativeBuildInputs = with pkgs; [
-	      git
-	      sqlite
-	      pkg-config
-	    ];
+            nativeBuildInputs = with pkgs; [
+              git
+              sqlite
+              pkg-config
+            ];
 
-	    buildInputs = with pkgs; [
-	      sqlite
+            buildInputs = with pkgs; [
+              sqlite
               clang-tools
               llvmPackages.libclang.lib
-	    ];
+            ];
 
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.getVersion pkgs.clang}/include -isystem ${pkgs.glibc.dev}/include";
@@ -75,29 +88,29 @@
               allowBuiltinFetchGit = true;
             };
 
-	    doCheck = false;
+            doCheck = false;
 
-	    nativeBuildInputs = with pkgs; [
-	      git
-	      sqlite
-	      pkg-config
-	    ];
+            nativeBuildInputs = with pkgs; [
+              git
+              sqlite
+              pkg-config
+            ];
 
-	    buildInputs = with pkgs; [
-	      sqlite
+            buildInputs = with pkgs; [
+              sqlite
               clang-tools
               llvmPackages.libclang.lib
-	    ];
+            ];
 
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.getVersion pkgs.clang}/include -isystem ${pkgs.glibc.dev}/include";
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
 
             postPatch = ''
-	      if [ -f build.rs ]; then
-		echo 'fn main() { println!("cargo:rustc-env=GIT_HASH=${sqlite-regex.rev or "unknown"}"); }' > build.rs
-	      fi
-              sed -i 's/crate-type =/crate-type = ["staticlib", "cdylib"]/' Cargo.toml
+              	      if [ -f build.rs ]; then
+              		echo 'fn main() { println!("cargo:rustc-env=GIT_HASH=${sqlite-regex.rev or "unknown"}"); }' > build.rs
+              	      fi
+                            sed -i 's/crate-type =/crate-type = ["staticlib", "cdylib"]/' Cargo.toml
             '';
 
             postInstall = ''
@@ -106,26 +119,27 @@
             '';
           };
 
-        in {
+        in
+        {
           default = pkgs.stdenv.mkDerivation {
             pname = "clogite";
             version = "0.0.0";
             src = ./.;
 
             nativeBuildInputs = [ pkgs.zig.hook ];
-            
+
             buildInputs = [
               pkgs.sqlite
               sqlite-zstd-lib
               sqlite-regex-lib
             ];
 
-	    preBuild = ''
-	      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-	      mkdir -p $ZIG_GLOBAL_CACHE_DIR/p
-	      cp -rL ${zig-deps}/* $ZIG_GLOBAL_CACHE_DIR/p/
-	      chmod -R +w $ZIG_GLOBAL_CACHE_DIR/p/
-	    '';
+            preBuild = ''
+              	      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
+              	      mkdir -p $ZIG_GLOBAL_CACHE_DIR/p
+              	      cp -rL ${zig-deps}/* $ZIG_GLOBAL_CACHE_DIR/p/
+              	      chmod -R +w $ZIG_GLOBAL_CACHE_DIR/p/
+              	    '';
 
             zigBuildFlags = [
               "-Dsqlite-zstd-lib-path=${sqlite-zstd-lib}/lib"
@@ -135,10 +149,12 @@
         }
       );
 
-      devShells = forAllSystems (system:
+      devShells = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-        in {
+        in
+        {
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
               zig
@@ -149,7 +165,7 @@
               git
               clang-tools
               llvmPackages.libclang.lib
-	      zon2nix
+              zon2nix
             ];
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.getVersion pkgs.clang}/include -isystem ${pkgs.glibc.dev}/include";
