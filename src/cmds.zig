@@ -22,8 +22,8 @@ pub const CmdDetail = struct {
     cmd: Cmd,
     exit_codes: []ExitCodeStat,
 
-    pub fn deinit(self: CmdDetail, allocator: std.mem.Allocator) void {
-        allocator.free(self.exit_codes);
+    pub fn deinit(self: CmdDetail, alloc: std.mem.Allocator) void {
+        alloc.free(self.exit_codes);
     }
 };
 
@@ -43,7 +43,7 @@ fn normalizeCommand(alloc: std.mem.Allocator, raw_cmd: []const u8) ![]const u8 {
 }
 
 pub fn addCommand(ctxi: *ctx.Ctx, raw_cmd: []const u8, exit_code: u8, duration_ms: u64) !void {
-    const alloc = ctxi.allocator;
+    const alloc = ctxi.alloc;
     var db = ctxi.db orelse return error.DatabaseNotInitialized;
 
     const clean_cmd = try normalizeCommand(alloc, raw_cmd);
@@ -84,10 +84,10 @@ pub fn addCommand(ctxi: *ctx.Ctx, raw_cmd: []const u8, exit_code: u8, duration_m
 }
 
 pub fn removeCommand(ctxi: *ctx.Ctx, raw_cmd: []const u8) !void {
-    const allocator = ctxi.allocator;
+    const alloc = ctxi.alloc;
     var db = ctxi.db orelse return error.DatabaseNotInitialized;
-    const clean_cmd = try normalizeCommand(allocator, raw_cmd);
-    defer allocator.free(clean_cmd);
+    const clean_cmd = try normalizeCommand(alloc, raw_cmd);
+    defer alloc.free(clean_cmd);
 
     try db.exec("DELETE FROM commands WHERE content = ?;", .{}, .{clean_cmd});
     try db_mod.maintenance(&db);
@@ -106,7 +106,7 @@ pub fn getCommands(alloc: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]C
     return try stmt.all(Cmd, alloc, .{}, .{limit_val});
 }
 
-pub fn getCommandInfo(alloc: std.mem.Allocator,ctxi: *ctx.Ctx, raw_cmd: []const u8) !?CmdDetail {
+pub fn getCommandInfo(alloc: std.mem.Allocator, ctxi: *ctx.Ctx, raw_cmd: []const u8) !?CmdDetail {
     var db = ctxi.db orelse return error.DatabaseNotInitialized;
     const clean_cmd = try normalizeCommand(alloc, raw_cmd);
     defer alloc.free(clean_cmd);

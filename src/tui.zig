@@ -113,10 +113,10 @@ fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool,
     return try wrapped_lines.toOwnedSlice(alloc);
 }
 
-fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: bool, search_term: []const u8, case_insensitive: bool) ![]vaxis.Cell.Segment {
+fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, search_term: []const u8, case_insensitive: bool) ![]vaxis.Cell.Segment {
     const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
-    const styles = try allocator.alloc(vaxis.Style, content.len);
-    defer allocator.free(styles);
+    const styles = try alloc.alloc(vaxis.Style, content.len);
+    defer alloc.free(styles);
     @memset(styles, .{ .bg = sel_bg });
 
     var i: usize = 0;
@@ -231,26 +231,26 @@ fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: 
     }
 
     var segments: std.ArrayList(vaxis.Cell.Segment) = .empty;
-    errdefer segments.deinit(allocator);
+    errdefer segments.deinit(alloc);
 
     if (content.len > 0) {
         var current_style = styles[0];
         var start_idx: usize = 0;
         for (styles, 0..) |s, j| {
             if (!std.meta.eql(s, current_style)) {
-                try segments.append(allocator, .{ .text = content[start_idx..j], .style = current_style });
+                try segments.append(alloc, .{ .text = content[start_idx..j], .style = current_style });
                 current_style = s;
                 start_idx = j;
             }
         }
-        try segments.append(allocator, .{ .text = content[start_idx..], .style = current_style });
+        try segments.append(alloc, .{ .text = content[start_idx..], .style = current_style });
     }
 
-    return try segments.toOwnedSlice(allocator);
+    return try segments.toOwnedSlice(alloc);
 }
 
 pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
-    const alloc = ctxi.allocator;
+    const alloc = ctxi.alloc;
 
     var buf: [1024]u8 = undefined;
     var tty = try vaxis.Tty.init(ctxi.io, &buf);

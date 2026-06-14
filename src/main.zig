@@ -91,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
                 return;
             },
             .view => {
-                const alloc = ctx.allocator;
+                const alloc = ctx.alloc;
                 ctx.db = try clogite.db.initDb(ctx);
                 if (try clogite.tui.initTui(&ctx)) |selected_cmd| {
                     defer alloc.free(selected_cmd);

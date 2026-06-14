@@ -15,7 +15,7 @@ pub fn print(io: std.Io, comptime txt: []const u8, args: anytype) !void {
 
 pub fn getAppDataDir(ctxi: ctx.Ctx, comptime name: []const u8) ![]u8 {
     const env = ctxi.environ_map;
-    const alloc = ctxi.allocator;
+    const alloc = ctxi.alloc;
     const root_path = switch (builtin.os.tag) {
         .windows => win_blk: {
             const local_app = env.get("LOCALAPPDATA") orelse return error.EnvironmentVariableNotFound;

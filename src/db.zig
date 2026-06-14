@@ -18,7 +18,7 @@ extern fn sqlite3_regex_init(
 ) callconv(.c) c_int;
 
 pub inline fn getDbPath(ctx: clogite.ctx.Ctx) [:0]const u8 {
-    const alloc = ctx.allocator;
+    const alloc = ctx.alloc;
     const data_dir = clogite.getAppDataDir(ctx, program_info.program_name) catch |e| blk: {
         std.log.err("Error getting app data path: {}", .{e});
         std.log.warn("Falling back to cwd", .{});
@@ -36,7 +36,7 @@ pub inline fn getDbPath(ctx: clogite.ctx.Ctx) [:0]const u8 {
 }
 
 pub inline fn checkDbSize(ctx: clogite.ctx.Ctx, db_path: ?[:0]const u8) bool {
-    const alloc = ctx.allocator;
+    const alloc = ctx.alloc;
     const path = db_path orelse getDbPath(ctx);
     defer if (db_path == null) alloc.free(path);
 
@@ -54,7 +54,7 @@ pub inline fn checkDbSize(ctx: clogite.ctx.Ctx, db_path: ?[:0]const u8) bool {
 }
 
 pub inline fn checkDbExists(ctx: clogite.ctx.Ctx, db_path: ?[:0]const u8) bool {
-    const alloc = ctx.allocator;
+    const alloc = ctx.alloc;
     const path = db_path orelse getDbPath(ctx);
     defer if (db_path == null) alloc.free(path);
     std.Io.Dir.accessAbsolute(ctx.io, path, .{}) catch {
