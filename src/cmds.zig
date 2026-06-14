@@ -1,6 +1,7 @@
 const std = @import("std");
 const sqlite = @import("sqlite");
 const db_mod = @import("db.zig");
+const ctx = @import("ctx.zig");
 
 pub const Cmd = struct {
     id: i64,
@@ -41,16 +42,17 @@ fn normalizeCommand(alloc: std.mem.Allocator, raw_cmd: []const u8) ![]const u8 {
     return list.toOwnedSlice(alloc);
 }
 
-pub fn addCommand(io: std.Io, db: *sqlite.Db, raw_cmd: []const u8, exit_code: u8, duration_ms: u64) !void {
-    const allocator = std.heap.smp_allocator;
+pub fn addCommand(ctxi: *ctx.Ctx, raw_cmd: []const u8, exit_code: u8, duration_ms: u64) !void {
+    const alloc = ctxi.allocator;
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
 
-    const clean_cmd = try normalizeCommand(allocator, raw_cmd);
-    defer allocator.free(clean_cmd);
+    const clean_cmd = try normalizeCommand(alloc, raw_cmd);
+    defer alloc.free(clean_cmd);
 
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(clean_cmd, &hash, .{});
 
-    const now = std.Io.Clock.real.now(io).toSeconds();
+    const now = std.Io.Clock.real.now(ctxi.io).toSeconds();
 
     try db.exec(
         \\INSERT INTO commands (
@@ -78,16 +80,17 @@ pub fn addCommand(io: std.Io, db: *sqlite.Db, raw_cmd: []const u8, exit_code: u8
         \\ON CONFLICT(command_id, exit_code) DO UPDATE SET
         \\    frequency = exit_code_stats.frequency + 1;
     , .{}, .{ exit_code, &hash });
-    try db_mod.maintenance(db);
+    try db_mod.maintenance(&db);
 }
 
-pub fn removeCommand(db: *sqlite.Db, raw_cmd: []const u8) !void {
-    const allocator = std.heap.smp_allocator;
+pub fn removeCommand(ctxi: *ctx.Ctx, raw_cmd: []const u8) !void {
+    const allocator = ctxi.allocator;
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
     const clean_cmd = try normalizeCommand(allocator, raw_cmd);
     defer allocator.free(clean_cmd);
 
     try db.exec("DELETE FROM commands WHERE content = ?;", .{}, .{clean_cmd});
-    try db_mod.maintenance(db);
+    try db_mod.maintenance(&db);
 }
 
 pub fn getCommands(alloc: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]Cmd {
@@ -103,9 +106,10 @@ pub fn getCommands(alloc: std.mem.Allocator, db: *sqlite.Db, limit: ?usize) ![]C
     return try stmt.all(Cmd, alloc, .{}, .{limit_val});
 }
 
-pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []const u8) !?CmdDetail {
-    const clean_cmd = try normalizeCommand(allocator, raw_cmd);
-    defer allocator.free(clean_cmd);
+pub fn getCommandInfo(alloc: std.mem.Allocator,ctxi: *ctx.Ctx, raw_cmd: []const u8) !?CmdDetail {
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
+    const clean_cmd = try normalizeCommand(alloc, raw_cmd);
+    defer alloc.free(clean_cmd);
 
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(clean_cmd, &hash, .{});
@@ -117,7 +121,7 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
     );
     defer cmd_stmt.deinit();
 
-    const cmd = (try cmd_stmt.oneAlloc(Cmd, allocator, .{}, .{
+    const cmd = (try cmd_stmt.oneAlloc(Cmd, alloc, .{}, .{
         .content_hash = &hash,
     })) orelse return null;
 
@@ -129,7 +133,7 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
     );
     defer stats_stmt.deinit();
 
-    const exit_codes = try stats_stmt.all(ExitCodeStat, allocator, .{}, .{cmd.id});
+    const exit_codes = try stats_stmt.all(ExitCodeStat, alloc, .{}, .{cmd.id});
 
     return CmdDetail{
         .cmd = cmd,
@@ -137,11 +141,13 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
     };
 }
 
-pub fn searchCommands(io: std.Io, alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool, regex: bool) ![]Cmd {
-    if (term.len == 0) return getCommands(alloc, db, null);
+pub fn searchCommands(ctxi: *ctx.Ctx, alloc: std.mem.Allocator, term: []const u8, case_sensitive: bool, regex: bool) ![]Cmd {
+    const io = ctxi.io;
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
+    if (term.len == 0) return getCommands(alloc, &db, null);
 
     if (!regex) {
-        if (term.len == 0) return getCommands(alloc, db, null);
+        if (term.len == 0) return getCommands(alloc, &db, null);
 
         if (case_sensitive) {
             var stmt = try db.prepare(

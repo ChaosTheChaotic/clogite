@@ -53,14 +53,14 @@ fn errSub(sub: []const u8) noreturn {
 }
 
 pub fn main(init: std.process.Init) !void {
-    var db: ?clogite.db.sqlite.Db = null;
-    defer if (db) |*d| d.deinit();
     var args = init.minimal.args.iterate();
     _ = args.next(); // Skip the program path
     _ = args.next() orelse { // If null no args were passed
         try print_help(init.io);
         return;
     };
+    var ctx = try clogite.ctx.Ctx.init(&init, std.heap.smp_allocator);
+    defer ctx.deinit();
     while (args.next()) |arg| {
         switch (SubCmd.parse(arg) orelse {
             std.log.warn("Ignoring unknown argument: {s}\n", .{arg});
@@ -75,25 +75,25 @@ pub fn main(init: std.process.Init) !void {
                 try clogite.print(init.io, "Version: {f}", .{clogite.program_info.program_version});
             },
             .add => {
-                db = try clogite.db.initDb(&init);
+                ctx.db = try clogite.db.initDb(ctx);
                 const cmd = args.next() orelse errSub("add");
                 const exit_str = args.next() orelse errSub("add");
                 const exit = try std.fmt.parseInt(u8, exit_str, 10);
                 const dur_str = args.next() orelse errSub("add");
                 const dur = try std.fmt.parseInt(u64, dur_str, 10);
-                try clogite.cmds.addCommand(init.io, &db.?, cmd, exit, dur);
+                try clogite.cmds.addCommand(&ctx, cmd, exit, dur);
                 return;
             },
             .remove => {
-                db = try clogite.db.initDb(&init);
+                ctx.db = try clogite.db.initDb(ctx);
                 const cmd = args.next() orelse errSub("remove");
-                try clogite.cmds.removeCommand(&db.?, cmd);
+                try clogite.cmds.removeCommand(&ctx, cmd);
                 return;
             },
             .view => {
-                const alloc = std.heap.smp_allocator;
-                db = try clogite.db.initDb(&init);
-                if (try clogite.tui.initTui(&init, &db.?)) |selected_cmd| {
+                const alloc = ctx.allocator;
+                ctx.db = try clogite.db.initDb(ctx);
+                if (try clogite.tui.initTui(&ctx)) |selected_cmd| {
                     defer alloc.free(selected_cmd);
                     const shell_env = init.environ_map.get("SHELL") orelse null;
 

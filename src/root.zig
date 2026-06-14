@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 pub const db = @import("db.zig");
 pub const tui = @import("tui.zig");
 pub const cmds = @import("cmds.zig");
+pub const ctx = @import("ctx.zig");
 pub const program_info = @import("program_info");
 
 pub fn print(io: std.Io, comptime txt: []const u8, args: anytype) !void {
@@ -12,7 +13,9 @@ pub fn print(io: std.Io, comptime txt: []const u8, args: anytype) !void {
     try stdout.interface.flush();
 }
 
-pub fn getAppDataDir(alloc: std.mem.Allocator, env: std.process.Environ.Map, comptime name: []const u8) ![]u8 {
+pub fn getAppDataDir(ctxi: ctx.Ctx, comptime name: []const u8) ![]u8 {
+    const env = ctxi.environ_map;
+    const alloc = ctxi.allocator;
     const root_path = switch (builtin.os.tag) {
         .windows => win_blk: {
             const local_app = env.get("LOCALAPPDATA") orelse return error.EnvironmentVariableNotFound;

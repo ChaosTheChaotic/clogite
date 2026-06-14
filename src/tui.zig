@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const sqlite = @import("sqlite");
 const db_mod = @import("db.zig");
 const cmds = @import("cmds.zig");
+const ctx = @import("ctx.zig");
 
 const Colors = enum(u8) {
     green = 2,
@@ -248,20 +249,20 @@ fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: 
     return try segments.toOwnedSlice(allocator);
 }
 
-pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
-    const alloc = std.heap.smp_allocator;
+pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
+    const alloc = ctxi.allocator;
 
     var buf: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(init.io, &buf);
+    var tty = try vaxis.Tty.init(ctxi.io, &buf);
     defer tty.deinit();
 
-    var vx = try vaxis.init(init.io, alloc, init.environ_map, .{});
+    var vx = try vaxis.init(ctxi.io, alloc, &ctxi.environ_map, .{});
     defer vx.deinit(alloc, tty.writer());
 
-    const q = vaxis.Queue(Event, 512){ .io = init.io };
+    const q = vaxis.Queue(Event, 512){ .io = ctxi.io };
 
     var loop: vaxis.Loop(Event) = .{
-        .io = init.io,
+        .io = ctxi.io,
         .tty = &tty,
         .vaxis = &vx,
         .queue = q,
@@ -274,10 +275,12 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
     var text_input = vaxis.widgets.TextInput.init(alloc);
     defer text_input.deinit();
 
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
+
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
 
-    var history = try cmds.getCommands(arena.allocator(), db, null);
+    var history = try cmds.getCommands(arena.allocator(), &db, null);
 
     var selected_idx: i64 = 0;
     var scroll_offset: usize = 0;
@@ -314,9 +317,9 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
                 } else break;
             }
 
-            history = try cmds.searchCommands(init.io, aa, db, actual_search, case_insensitive, regex);
+            history = try cmds.searchCommands(ctxi, aa, actual_search, case_insensitive, regex);
         } else {
-            history = try cmds.getCommands(aa, db, null);
+            history = try cmds.getCommands(aa, &db, null);
         }
 
         if (displayed_screen == .history) {
@@ -371,7 +374,7 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
                 const is_selected = (current_item_idx == selected_idx);
                 const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
 
-                const ago_str = try formatAgo(init.io, aa, cmd.last_run_at);
+                const ago_str = try formatAgo(ctxi.io, aa, cmd.last_run_at);
                 const dur_str = try formatDuration(aa, cmd.last_duration_ms);
 
                 var base_ago = style_dim;
@@ -439,7 +442,7 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
             });
 
             const current_cmd = history[@intCast(selected_idx)].content;
-            if (try cmds.getCommandInfo(aa, db, current_cmd)) |d| {
+            if (try cmds.getCommandInfo(aa, ctxi, current_cmd)) |d| {
                 var row: u16 = 1;
                 const margin: u16 = 2;
 
@@ -464,7 +467,7 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
 
                 const avg_dur = if (d.cmd.run_count > 0) @divTrunc(d.cmd.total_duration_ms, d.cmd.run_count) else 0;
 
-                const ago_str = try formatAgo(init.io, aa, d.cmd.last_run_at);
+                const ago_str = try formatAgo(ctxi.io, aa, d.cmd.last_run_at);
                 const total_dur_str = try formatDuration(aa, d.cmd.total_duration_ms);
                 const avg_dur_str = try formatDuration(aa, avg_dur);
 
@@ -518,7 +521,7 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
                     const cmd = history[@intCast(selected_idx)].content;
                     return try std.mem.concat(alloc, u8, &.{ "\x1F", cmd });
                 } else if (key.matches('d', .{ .ctrl = true })) {
-                    try cmds.removeCommand(db, history[@intCast(selected_idx)].content);
+                    try cmds.removeCommand(ctxi, history[@intCast(selected_idx)].content);
                 } else if (key.matches('o', .{ .ctrl = true })) {
                     displayed_screen = .info;
                 } else if (displayed_screen == .history) {
@@ -530,6 +533,6 @@ pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
             .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
         }
     }
-    try db_mod.maintenance(db);
+    try db_mod.maintenance(&db);
     return null;
 }
