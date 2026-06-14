@@ -55,123 +55,126 @@ fn errSub(sub: []const u8) noreturn {
 pub fn main(init: std.process.Init) !void {
     var args = init.minimal.args.iterate();
     _ = args.next(); // Skip the program path
-    _ = args.next() orelse { // If null no args were passed
+
+    const subcmd_str = args.next() orelse {
+        // No args were passed
         try print_help(init.io);
         return;
     };
+
     var ctx = try clogite.ctx.Ctx.init(&init, std.heap.smp_allocator);
     defer ctx.deinit();
-    while (args.next()) |arg| {
-        switch (SubCmd.parse(arg) orelse {
-            std.log.warn("Ignoring unknown argument: {s}\n", .{arg});
+
+    // Parse the captured subcommand directly
+    switch (SubCmd.parse(subcmd_str) orelse {
+        std.log.warn("Ignoring unknown argument: {s}\n", .{subcmd_str});
+        try print_help(init.io);
+        return;
+    }) {
+        .help => {
             try print_help(init.io);
-            continue;
-        }) {
-            .help => {
-                try print_help(init.io);
-                std.process.exit(0);
-            },
-            .version => {
-                try clogite.print(init.io, "Version: {f}", .{clogite.program_info.program_version});
-            },
-            .add => {
-                ctx.db = try clogite.db.initDb(ctx);
-                const cmd = args.next() orelse errSub("add");
-                const exit_str = args.next() orelse errSub("add");
-                const exit = try std.fmt.parseInt(u8, exit_str, 10);
-                const dur_str = args.next() orelse errSub("add");
-                const dur = try std.fmt.parseInt(u64, dur_str, 10);
-                try clogite.cmds.addCommand(&ctx, cmd, exit, dur);
-                return;
-            },
-            .remove => {
-                ctx.db = try clogite.db.initDb(ctx);
-                const cmd = args.next() orelse errSub("remove");
-                try clogite.cmds.removeCommand(&ctx, cmd);
-                return;
-            },
-            .view => {
-                const alloc = ctx.alloc;
-                ctx.db = try clogite.db.initDb(ctx);
-                if (try clogite.tui.initTui(&ctx)) |selected_cmd| {
-                    defer alloc.free(selected_cmd);
-                    const shell_env = init.environ_map.get("SHELL") orelse null;
+            std.process.exit(0);
+        },
+        .version => {
+            try clogite.print(init.io, "Version: {f}", .{clogite.program_info.program_version});
+        },
+        .add => {
+            ctx.db = try clogite.db.initDb(ctx);
+            const cmd = args.next() orelse errSub("add");
+            const exit_str = args.next() orelse errSub("add");
+            const exit = try std.fmt.parseInt(u8, exit_str, 10);
+            const dur_str = args.next() orelse errSub("add");
+            const dur = try std.fmt.parseInt(u64, dur_str, 10);
+            try clogite.cmds.addCommand(&ctx, cmd, exit, dur);
+            return;
+        },
+        .remove => {
+            ctx.db = try clogite.db.initDb(ctx);
+            const cmd = args.next() orelse errSub("remove");
+            try clogite.cmds.removeCommand(&ctx, cmd);
+            return;
+        },
+        .view => {
+            const alloc = ctx.alloc;
+            ctx.db = try clogite.db.initDb(ctx);
+            if (try clogite.tui.initTui(&ctx)) |selected_cmd| {
+                defer alloc.free(selected_cmd);
+                const shell_env = init.environ_map.get("SHELL") orelse null;
 
-                    if (shell_env) |shell_path| {
-                        defer alloc.free(shell_path);
+                if (shell_env) |shell_path| {
+                    defer alloc.free(shell_path);
 
-                        if (std.mem.endsWith(u8, shell_path, "zsh")) {
-                            var stdout = std.Io.File.stdout().writer(init.io, &.{});
+                    if (std.mem.endsWith(u8, shell_path, "zsh")) {
+                        var stdout = std.Io.File.stdout().writer(init.io, &.{});
 
-                            try stdout.interface.writeAll(selected_cmd);
-                            try stdout.interface.flush();
-                        } else if (std.mem.endsWith(u8, shell_path, "bash")) {
-                            // I dont know what to do for this one
-                        } else {
-                            // I dont know or think about other shells very often
-                        }
+                        try stdout.interface.writeAll(selected_cmd);
+                        try stdout.interface.flush();
+                    } else if (std.mem.endsWith(u8, shell_path, "bash")) {
+                        // I dont know what to do for this one
+                    } else {
+                        // I dont know or think about other shells very often
                     }
                 }
-                return;
-            },
-            .init => {
-                const zsh_init_script =
-                    \\zmodload zsh/datetime
-                    \\
-                    \\__clogite_preexec() {
-                    \\    __clogite_cmd=$1
-                    \\    __clogite_start=$EPOCHREALTIME
-                    \\}
-                    \\
-                    \\__clogite_precmd() {
-                    \\    local exit_code=$?
-                    \\    if [[ -n "$__clogite_start" && -n "$__clogite_cmd" ]]; then
-                    \\        local duration_ms=$(( (EPOCHREALTIME - __clogite_start) * 1000 ))
-                    \\        duration_ms=${duration_ms%.*}
-                    \\        clogite add "$__clogite_cmd" $exit_code $duration_ms &|
-                    \\    fi
-                    \\    __clogite_start=
-                    \\    __clogite_cmd=
-                    \\}
-                    \\
-                    \\__clogite_history_widget() {
-                    \\    local selected="$(clogite view)"
-                    \\    if [[ -n "$selected" ]]; then
-                    \\        local mode="${selected[1]}"
-                    \\        local cmd="${selected[2,-1]}"
-                    \\        case "$mode" in
-                    \\            $'\x1E')
-                    \\                BUFFER="$cmd"
-                    \\                CURSOR=$#BUFFER
-                    \\                zle accept-line
-                    \\                ;;
-                    \\            $'\x1F')
-                    \\                BUFFER="$cmd"
-                    \\                CURSOR=$#BUFFER
-                    \\                ;;
-                    \\            *)         # Fallback (shouldnt happen)
-                    \\                BUFFER="$selected"
-                    \\                CURSOR=$#BUFFER
-                    \\                ;;
-                    \\        esac
-                    \\    fi
-                    \\    zle reset-prompt
-                    \\}
-                    \\
-                    \\autoload -Uz add-zsh-hook
-                    \\add-zsh-hook preexec __clogite_preexec
-                    \\add-zsh-hook precmd __clogite_precmd
-                    \\
-                    \\zle -N __clogite_history_widget
-                    \\bindkey '\e[A' __clogite_history_widget
-                    \\bindkey '\eOA' __clogite_history_widget
-                ;
-                var stdout = std.Io.File.stdout().writer(init.io, &.{});
+            }
+            return;
+        },
+        .init => {
+            const zsh_init_script =
+                \\zmodload zsh/datetime
+                \\
+                \\__clogite_preexec() {
+                \\    __clogite_cmd=$1
+                \\    __clogite_start=$EPOCHREALTIME
+                \\}
+                \\
+                \\__clogite_precmd() {
+                \\    local exit_code=$?
+                \\    if [[ -n "$__clogite_start" && -n "$__clogite_cmd" ]]; then
+                \\        local duration_ms=$(( (EPOCHREALTIME - __clogite_start) * 1000 ))
+                \\        duration_ms=${duration_ms%.*}
+                \\        clogite add "$__clogite_cmd" $exit_code $duration_ms &|
+                \\    fi
+                \\    __clogite_start=
+                \\    __clogite_cmd=
+                \\}
+                \\
+                \\__clogite_history_widget() {
+                \\    local selected="$(clogite view)"
+                \\    if [[ -n "$selected" ]]; then
+                \\        local mode="${selected[1]}"
+                \\        local cmd="${selected[2,-1]}"
+                \\        case "$mode" in
+                \\            $'\x1E')
+                \\                BUFFER="$cmd"
+                \\                CURSOR=$#BUFFER
+                \\                zle accept-line
+                \\                ;;
+                \\            $'\x1F')
+                \\                BUFFER="$cmd"
+                \\                CURSOR=$#BUFFER
+                \\                ;;
+                \\            *)         # Fallback (shouldnt happen)
+                \\                BUFFER="$selected"
+                \\                CURSOR=$#BUFFER
+                \\                ;;
+                \\        esac
+                \\    fi
+                \\    zle reset-prompt
+                \\}
+                \\
+                \\autoload -Uz add-zsh-hook
+                \\add-zsh-hook preexec __clogite_preexec
+                \\add-zsh-hook precmd __clogite_precmd
+                \\
+                \\zle -N __clogite_history_widget
+                \\bindkey '\e[A' __clogite_history_widget
+                \\bindkey '\eOA' __clogite_history_widget
+            ;
+            var stdout = std.Io.File.stdout().writer(init.io, &.{});
 
-                try stdout.interface.writeAll(zsh_init_script);
-                try stdout.interface.flush();
-                return;
-            },
-        }
+            try stdout.interface.writeAll(zsh_init_script);
+            try stdout.interface.flush();
+            return;
+        },
     }
 }
