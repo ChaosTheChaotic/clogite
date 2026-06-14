@@ -23,8 +23,8 @@ const Screen = enum {
     info,
 };
 
-fn formatAgo(alloc: std.mem.Allocator, timestamp: i64) ![]const u8 {
-    const diff = std.time.timestamp() - timestamp;
+fn formatAgo(io: std.Io, alloc: std.mem.Allocator, timestamp: i64) ![]const u8 {
+    const diff = std.Io.Clock.real.now(io).toSeconds() - timestamp;
     if (diff < 60)
         return try std.fmt.allocPrint(alloc, "{d}s ago", .{diff})
     else if (diff < 3600)
@@ -248,21 +248,24 @@ fn highlightZsh(allocator: std.mem.Allocator, content: []const u8, is_selected: 
     return try segments.toOwnedSlice(allocator);
 }
 
-pub fn initTui(db: *sqlite.Db) !?[]const u8 {
+pub fn initTui(init: *const std.process.Init, db: *sqlite.Db) !?[]const u8 {
     const alloc = std.heap.smp_allocator;
 
     var buf: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(&buf);
+    var tty = try vaxis.Tty.init(init.io, &buf);
     defer tty.deinit();
 
-    var vx = try vaxis.init(alloc, .{});
+    var vx = try vaxis.init(init.io, alloc, init.environ_map, .{});
     defer vx.deinit(alloc, tty.writer());
+
+    const q = vaxis.Queue(Event, 512){ .io = init.io };
+
     var loop: vaxis.Loop(Event) = .{
+        .io = init.io,
         .tty = &tty,
         .vaxis = &vx,
+        .queue = q,
     };
-    try loop.init();
-
     try loop.start();
     defer loop.stop();
 
@@ -311,7 +314,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 } else break;
             }
 
-            history = try cmds.searchCommands(aa, db, actual_search, case_insensitive, regex);
+            history = try cmds.searchCommands(init.io, aa, db, actual_search, case_insensitive, regex);
         } else {
             history = try cmds.getCommands(aa, db, null);
         }
@@ -368,7 +371,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
                 const is_selected = (current_item_idx == selected_idx);
                 const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
 
-                const ago_str = try formatAgo(aa, cmd.last_run_at);
+                const ago_str = try formatAgo(init.io, aa, cmd.last_run_at);
                 const dur_str = try formatDuration(aa, cmd.last_duration_ms);
 
                 var base_ago = style_dim;
@@ -461,7 +464,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
 
                 const avg_dur = if (d.cmd.run_count > 0) @divTrunc(d.cmd.total_duration_ms, d.cmd.run_count) else 0;
 
-                const ago_str = try formatAgo(aa, d.cmd.last_run_at);
+                const ago_str = try formatAgo(init.io, aa, d.cmd.last_run_at);
                 const total_dur_str = try formatDuration(aa, d.cmd.total_duration_ms);
                 const avg_dur_str = try formatDuration(aa, avg_dur);
 
@@ -498,7 +501,7 @@ pub fn initTui(db: *sqlite.Db) !?[]const u8 {
         }
 
         try vx.render(tty.writer());
-        const event = loop.nextEvent();
+        const event = try loop.nextEvent();
 
         switch (event) {
             .key_press => |key| {

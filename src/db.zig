@@ -1,6 +1,7 @@
 const std = @import("std");
 pub const sqlite = @import("sqlite");
 const program_info = @import("program_info");
+const clogite = @import("root.zig");
 
 const c = sqlite.c;
 
@@ -16,11 +17,11 @@ extern fn sqlite3_regex_init(
     p_api: ?*c.sqlite3_api_routines,
 ) callconv(.c) c_int;
 
-pub inline fn getDbPath(alloc: std.mem.Allocator) [:0]const u8 {
-    const data_dir = std.fs.getAppDataDir(alloc, program_info.program_name) catch |e| blk: {
+pub inline fn getDbPath(init: *const std.process.Init, alloc: std.mem.Allocator) [:0]const u8 {
+    const data_dir = clogite.getAppDataDir(alloc, init.environ_map.*, program_info.program_name) catch |e| blk: {
         std.log.err("Error getting app data path: {}", .{e});
         std.log.warn("Falling back to cwd", .{});
-        break :blk std.fs.cwd().realpathAlloc(alloc, ".") catch |fe| {
+        break :blk std.Io.Dir.cwd().realPathFileAlloc(init.io, ".", alloc) catch |fe| {
             std.log.err("Fatal: {}", .{fe});
             std.process.exit(1);
         };
@@ -33,29 +34,29 @@ pub inline fn getDbPath(alloc: std.mem.Allocator) [:0]const u8 {
     return path;
 }
 
-pub inline fn checkDbSize(db_path: ?[:0]const u8) bool {
+pub inline fn checkDbSize(init: *const std.process.Init, db_path: ?[:0]const u8) bool {
     const alloc = std.heap.smp_allocator;
-    const path = db_path orelse getDbPath(alloc);
+    const path = db_path orelse getDbPath(init, alloc);
     defer if (db_path == null) alloc.free(path);
 
-    const fp = std.fs.openFileAbsolute(path, .{}) catch |e| {
+    const fp = std.Io.Dir.openFileAbsolute(init.io, path, .{}) catch |e| {
         std.log.err("Failed to open database at {s} to verify size: {t}", .{ path, e });
         return false;
     };
-    defer fp.close();
+    defer fp.close(init.io);
 
-    const stat = fp.stat() catch |e| {
+    const stat = fp.stat(init.io) catch |e| {
         std.log.err("Failed to stat file at {s}: {t}", .{ path, e });
         return false;
     };
     return stat.size > 0;
 }
 
-pub inline fn checkDbExists(db_path: ?[:0]const u8) bool {
+pub inline fn checkDbExists(init: *const std.process.Init, db_path: ?[:0]const u8) bool {
     const alloc = std.heap.smp_allocator;
-    const path = db_path orelse getDbPath(alloc);
+    const path = db_path orelse getDbPath(init, alloc);
     defer if (db_path == null) alloc.free(path);
-    std.fs.accessAbsolute(path, .{}) catch {
+    std.Io.Dir.accessAbsolute(init.io, path, .{}) catch {
         return false;
     };
     return true;
@@ -147,9 +148,9 @@ pub fn maintenance(db: *sqlite.Db) !void {
     try db.exec("INSERT INTO commands_fts(commands_fts) VALUES('optimize');", .{}, .{});
 }
 
-pub fn initDb() !sqlite.Db {
+pub fn initDb(init: *const std.process.Init) !sqlite.Db {
     const alloc = std.heap.smp_allocator;
-    const db_path = getDbPath(alloc);
+    const db_path = getDbPath(init, alloc);
 
     const rcz = c.sqlite3_auto_extension(@ptrCast(&sqlite3_sqlitezstd_init));
     if (rcz != c.SQLITE_OK) {
@@ -162,7 +163,7 @@ pub fn initDb() !sqlite.Db {
         return error.ExtensionRegistrationFailed;
     }
 
-    if (checkDbExists(db_path) and checkDbSize(db_path)) {
+    if (checkDbExists(init, db_path) and checkDbSize(init, db_path)) {
         var db = try sqlite.Db.init(.{
             .mode = .{ .File = db_path },
             .open_flags = .{ .write = true },
@@ -174,9 +175,8 @@ pub fn initDb() !sqlite.Db {
     }
 
     if (std.fs.path.dirname(db_path)) |dir| {
-        std.fs.cwd().makePath(dir) catch |e| {
+        std.Io.Dir.cwd().createDirPath(init.io, dir) catch |e| {
             std.log.err("Failed to create directory {s}: {}", .{ dir, e });
-            return e;
         };
     }
 

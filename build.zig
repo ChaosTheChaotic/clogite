@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "sqlite", .module = sqlite.module("sqlite") },
-            .{ .name = "vaxis", .module = vaxis.module("vaxis" ) },
+            .{ .name = "vaxis", .module = vaxis.module("vaxis") },
         },
     });
 
@@ -140,7 +140,7 @@ pub fn build(b: *std.Build) void {
         mod.addLibraryPath(.{ .cwd_relative = path });
         mod.linkSystemLibrary("sqlite_regex", .{ .preferred_link_mode = .dynamic });
 
-        exe.addRPath(.{ .cwd_relative = regex_path });
+        exe.root_module.addRPath(.{ .cwd_relative = regex_path });
 
         if (target.result.os.tag != .windows) {
             mod.linkSystemLibrary("pthread", .{});

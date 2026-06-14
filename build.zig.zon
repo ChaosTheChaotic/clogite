@@ -25,7 +25,7 @@
     .fingerprint = 0xd41ab08b7e2c1477, // Changing this has security and trust implications.
     // Tracks the earliest Zig version that the package considers to be a
     // supported use case.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
@@ -33,12 +33,12 @@
     // internet connectivity.
     .dependencies = .{
         .sqlite = .{
-            .url = "git+https://github.com/vrischmann/zig-sqlite#0b75ba276d34de3141ec1697e3ef7c836d7b38e7",
-            .hash = "sqlite-3.48.0-F2R_a8eODgD9X8XjvWlZ1K7C-tDuHae4FuShM2N-yIT2",
+            .url = "git+https://github.com/vrischmann/zig-sqlite#2051af63d6c34bbbc40bb39945d188acdb132eb9",
+            .hash = "sqlite-3.48.0-F2R_ayuQDgATJL_BQ-5jv8zuzgnGwZ8ZDuhecttteNci",
         },
         .vaxis = .{
-            .url = "git+https://github.com/rockorager/libvaxis.git#41fff922316dcb8776332ec460e73eaf397d5033",
-            .hash = "vaxis-0.5.1-BWNV_JJOCQAtdJyLvrYCKbKIhX9q3liQkKMAzujWS4HJ",
+            .url = "git+https://github.com/rockorager/libvaxis.git#762f325d31a92fd2dc83aa1899a412fb1b6f020d",
+            .hash = "vaxis-0.6.0-BWNV_C75CQAK-GVdeEw41oYi65WqsXybxCW6hlIzozNy",
         },
     },
     .paths = .{

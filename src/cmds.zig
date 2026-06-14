@@ -41,7 +41,7 @@ fn normalizeCommand(alloc: std.mem.Allocator, raw_cmd: []const u8) ![]const u8 {
     return list.toOwnedSlice(alloc);
 }
 
-pub fn addCommand(db: *sqlite.Db, raw_cmd: []const u8, exit_code: u8, duration_ms: u64) !void {
+pub fn addCommand(io: std.Io, db: *sqlite.Db, raw_cmd: []const u8, exit_code: u8, duration_ms: u64) !void {
     const allocator = std.heap.smp_allocator;
 
     const clean_cmd = try normalizeCommand(allocator, raw_cmd);
@@ -50,7 +50,7 @@ pub fn addCommand(db: *sqlite.Db, raw_cmd: []const u8, exit_code: u8, duration_m
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(clean_cmd, &hash, .{});
 
-    const now = std.time.timestamp();
+    const now = std.Io.Clock.real.now(io).toSeconds();
 
     try db.exec(
         \\INSERT INTO commands (
@@ -137,7 +137,7 @@ pub fn getCommandInfo(allocator: std.mem.Allocator, db: *sqlite.Db, raw_cmd: []c
     };
 }
 
-pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool, regex: bool) ![]Cmd {
+pub fn searchCommands(io: std.Io, alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8, case_sensitive: bool, regex: bool) ![]Cmd {
     if (term.len == 0) return getCommands(alloc, db, null);
 
     if (!regex) {
@@ -178,8 +178,8 @@ pub fn searchCommands(alloc: std.mem.Allocator, db: *sqlite.Db, term: []const u8
         const saved_fd = std.os.linux.dup(original_stderr);
         defer _ = std.os.linux.close(@intCast(saved_fd));
 
-        const null_fd = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .read_write });
-        defer null_fd.close();
+        const null_fd = try std.Io.Dir.openFileAbsolute(io, "/dev/null", .{ .mode = .read_write });
+        defer null_fd.close(io);
 
         _ = std.os.linux.dup2(null_fd.handle, original_stderr);
         defer {

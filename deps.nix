@@ -11,35 +11,35 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "sqlite-3.48.0-F2R_a8eODgD9X8XjvWlZ1K7C-tDuHae4FuShM2N-yIT2";
+    name = "sqlite-3.48.0-F2R_ayuQDgATJL_BQ-5jv8zuzgnGwZ8ZDuhecttteNci";
     path = fetchgit {
       url = "https://github.com/vrischmann/zig-sqlite";
-      rev = "0b75ba276d34de3141ec1697e3ef7c836d7b38e7";
-      hash = "sha256-p52EfIeMpbtkgAOGPjtHSt64FmZABjCZijaZglUPEPQ=";
+      rev = "2051af63d6c34bbbc40bb39945d188acdb132eb9";
+      hash = "sha256-aqugNPEsFJApaasPxXDpC20dK//0f5b02zePVUfcXVw=";
     };
   }
   {
-    name = "uucode-0.1.0-ZZjBPj96QADXyt5sqwBJUnhaDYs_qBeeKijZvlRa0eqM";
+    name = "uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA";
     path = fetchgit {
       url = "https://github.com/jacobsandlund/uucode";
-      rev = "5f05f8f83a75caea201f12cc8ea32a2d82ea9732";
-      hash = "sha256-sHPh+TQSdUGus/QTbj7KSJJkTuNTrK4VNmQDjS30Lf8=";
+      rev = "2826a37a4562284fdacd8fa029d49509cc9bffcd";
+      hash = "sha256-R5RXW5tWIaDq5JOF2+oWd5YOYOyns6WH7f687WE+b20=";
     };
   }
   {
-    name = "vaxis-0.5.1-BWNV_JJOCQAtdJyLvrYCKbKIhX9q3liQkKMAzujWS4HJ";
+    name = "vaxis-0.6.0-BWNV_C75CQAK-GVdeEw41oYi65WqsXybxCW6hlIzozNy";
     path = fetchgit {
       url = "https://github.com/rockorager/libvaxis.git";
-      rev = "41fff922316dcb8776332ec460e73eaf397d5033";
-      hash = "sha256-mpW/t9AVObhEs3jt/fGyybsvaAlzZ4GSkCs3KYrQn0g=";
+      rev = "762f325d31a92fd2dc83aa1899a412fb1b6f020d";
+      hash = "sha256-sZYa4CTsCgWZA/dFNAWQVZpJwfZluVsIeCKqY2KVyMY=";
     };
   }
   {
-    name = "zigimg-0.1.0-8_eo2vUZFgAAtN1c6dAO5DdqL0d4cEWHtn6iR5ucZJti";
+    name = "zigimg-0.1.0-8_eo2oyaFwBZwJpmqPkCfVXWBrHcqbYwmrp1I6bTD3lI";
     path = fetchgit {
       url = "https://github.com/zigimg/zigimg";
-      rev = "eab2522c023b9259db8b13f2f90d609b7437e5f6";
-      hash = "sha256-e42T/ZmRzuzWAhwWkcWScukcOd6rNZ1VK1wk0XGTVKs=";
+      rev = "d695acd97c02e57bb151e8f659d1280f5cd6ca70";
+      hash = "sha256-0IYATQldT6eJxRR2T/2CsIYZuzomqjvmdVyjmsjguyE=";
     };
   }
 ]

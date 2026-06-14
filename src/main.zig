@@ -17,8 +17,8 @@ const SubCmd = enum {
     }
 };
 
-fn print_help() !void {
-    try clogite.print(
+fn print_help(io: std.Io) !void {
+    try clogite.print(io,
         \\clogite - A command history and statistics logger
         \\
         \\Usage:
@@ -52,57 +52,56 @@ fn errSub(sub: []const u8) noreturn {
     std.process.exit(22);
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var db: ?clogite.db.sqlite.Db = null;
     defer if (db) |*d| d.deinit();
-    var args = std.process.args();
+    var args = init.minimal.args.iterate();
     _ = args.next(); // Skip the program path
-    if (std.os.argv.len <= 1) {
-        try print_help();
+    _ = args.next() orelse { // If null no args were passed
+        try print_help(init.io);
         return;
-    }
+    };
     while (args.next()) |arg| {
         switch (SubCmd.parse(arg) orelse {
             std.log.warn("Ignoring unknown argument: {s}\n", .{arg});
-            try print_help();
+            try print_help(init.io);
             continue;
         }) {
             .help => {
-                try print_help();
+                try print_help(init.io);
                 std.process.exit(0);
             },
             .version => {
-                try clogite.print("Version: {f}", .{clogite.program_info.program_version});
+                try clogite.print(init.io, "Version: {f}", .{clogite.program_info.program_version});
             },
             .add => {
-                db = try clogite.db.initDb();
+                db = try clogite.db.initDb(&init);
                 const cmd = args.next() orelse errSub("add");
                 const exit_str = args.next() orelse errSub("add");
                 const exit = try std.fmt.parseInt(u8, exit_str, 10);
                 const dur_str = args.next() orelse errSub("add");
                 const dur = try std.fmt.parseInt(u64, dur_str, 10);
-                try clogite.cmds.addCommand(&db.?, cmd, exit, dur);
+                try clogite.cmds.addCommand(init.io, &db.?, cmd, exit, dur);
                 return;
             },
             .remove => {
-                db = try clogite.db.initDb();
+                db = try clogite.db.initDb(&init);
                 const cmd = args.next() orelse errSub("remove");
                 try clogite.cmds.removeCommand(&db.?, cmd);
                 return;
             },
             .view => {
                 const alloc = std.heap.smp_allocator;
-                db = try clogite.db.initDb();
-                if (try clogite.tui.initTui(&db.?)) |selected_cmd| {
+                db = try clogite.db.initDb(&init);
+                if (try clogite.tui.initTui(&init, &db.?)) |selected_cmd| {
                     defer alloc.free(selected_cmd);
-                    const shell_env = std.process.getEnvVarOwned(alloc, "SHELL") catch |err|
-                        if (err == error.EnvironmentVariableNotFound) null else return err;
+                    const shell_env = init.environ_map.get("SHELL") orelse null;
 
                     if (shell_env) |shell_path| {
                         defer alloc.free(shell_path);
 
                         if (std.mem.endsWith(u8, shell_path, "zsh")) {
-                            var stdout = std.fs.File.stdout().writer(&.{});
+                            var stdout = std.Io.File.stdout().writer(init.io, &.{});
 
                             try stdout.interface.writeAll(selected_cmd);
                             try stdout.interface.flush();
@@ -167,7 +166,7 @@ pub fn main() !void {
                     \\bindkey '\e[A' __clogite_history_widget
                     \\bindkey '\eOA' __clogite_history_widget
                 ;
-                var stdout = std.fs.File.stdout().writer(&.{});
+                var stdout = std.Io.File.stdout().writer(init.io, &.{});
 
                 try stdout.interface.writeAll(zsh_init_script);
                 try stdout.interface.flush();
