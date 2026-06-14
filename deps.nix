@@ -29,7 +29,7 @@ linkFarm "zig-packages" [
   {
     name = "vaxis-0.6.0-BWNV_C75CQAK-GVdeEw41oYi65WqsXybxCW6hlIzozNy";
     path = fetchgit {
-      url = "https://github.com/rockorager/libvaxis.git";
+      url = "https://github.com/rockorager/libvaxis";
       rev = "762f325d31a92fd2dc83aa1899a412fb1b6f020d";
       hash = "sha256-sZYa4CTsCgWZA/dFNAWQVZpJwfZluVsIeCKqY2KVyMY=";
     };

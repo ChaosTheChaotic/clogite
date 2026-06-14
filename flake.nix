@@ -135,13 +135,13 @@
             ];
 
             preBuild = ''
-              	      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-              	      mkdir -p $ZIG_GLOBAL_CACHE_DIR/p
-              	      cp -rL ${zig-deps}/* $ZIG_GLOBAL_CACHE_DIR/p/
-              	      chmod -R +w $ZIG_GLOBAL_CACHE_DIR/p/
-              	    '';
+              export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
+              mkdir -p $ZIG_GLOBAL_CACHE_DIR
+            '';
 
             zigBuildFlags = [
+              "--system"
+              "${zig-deps}"
               "-Dsqlite-zstd-lib-path=${sqlite-zstd-lib}/lib"
               "-Dsqlite-regex-lib-path=${sqlite-regex-lib}/lib"
             ];
