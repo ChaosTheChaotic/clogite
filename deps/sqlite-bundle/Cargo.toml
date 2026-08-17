@@ -1,0 +1,12 @@
+[package]
+name = "sqlite-bundle"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+sqlite-zstd = { path = "../../vendor/sqlite-zstd", package = "sqlite-zstd", features = ["build_extension"] }
+sqlite-regex = { path = "../../vendor/sqlite-regex" }
+zstd-sys = "=2.0.9"

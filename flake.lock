@@ -2,11 +2,11 @@
   "nodes": {
     "nixpkgs": {
       "locked": {
-        "lastModified": 1781074563,
-        "narHash": "sha256-md8WlXOlfnIeHeOScMTTHFyf2d6iaTwPl2apR5EQ3P4=",
+        "lastModified": 1786599213,
+        "narHash": "sha256-yNJd40f11EzXBjSByCB7IPpeFFAdeoSKKM67dGkfFoU=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "9ae611a455b90cf061d8f332b977e387bda8e1ca",
+        "rev": "0e251e24a4f24e036a084b6b4b2d2491af4167f4",
         "type": "github"
       },
       "original": {
@@ -19,8 +19,25 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
+        "sqlite-loadable-rs": "sqlite-loadable-rs",
         "sqlite-regex": "sqlite-regex",
         "sqlite-zstd": "sqlite-zstd"
+      }
+    },
+    "sqlite-loadable-rs": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1746206937,
+        "narHash": "sha256-cuU2saUniWFKQudGq8SbmhuNXKFBdKWK6YS6TBjfEi8=",
+        "owner": "asg017",
+        "repo": "sqlite-loadable-rs",
+        "rev": "26cb2d88825451d4658c9eb8b61cee36a9577545",
+        "type": "github"
+      },
+      "original": {
+        "owner": "asg017",
+        "repo": "sqlite-loadable-rs",
+        "type": "github"
       }
     },
     "sqlite-regex": {

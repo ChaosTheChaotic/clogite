@@ -126,7 +126,7 @@ fn applyPragmas(db: *sqlite.Db) !void {
     _ = try db.pragma(void, .{}, "synchronous", "NORMAL");
     _ = try db.pragma(void, .{}, "temp_store", "MEMORY");
     _ = try db.pragma(void, .{}, "busy_timeout", "5000");
-    _ = try db.pragma(void, .{}, "auto_vaccum", "full");
+    _ = try db.pragma(void, .{}, "auto_vacuum", "full");
 }
 
 fn enableZstdCompression(db: *sqlite.Db) !void {

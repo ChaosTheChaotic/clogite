@@ -18,5 +18,6 @@ zig-pkg/
 /build-*/
 /docgen_tmp/
 
-deps/
+vendor/
+target/
 .direnv/

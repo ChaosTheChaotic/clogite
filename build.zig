@@ -6,9 +6,7 @@ const std = @import("std");
 // for defining build steps and express dependencies between them, allowing the
 // build runner to parallelize the build automatically (and the cache system to
 // know when a step doesn't need to be re-run).
-pub fn build(b: *std.Build) void {
-    const sqlite_zstd_path = b.option([]const u8, "sqlite-zstd-lib-path", "Path to sqlite-zstd library");
-    const sqlite_regex_path = b.option([]const u8, "sqlite-regex-lib-path", "Path to sqlite-regex library");
+pub fn build(b: *std.Build) !void {
     // Standard target options allow the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -26,6 +24,14 @@ pub fn build(b: *std.Build) void {
     const opts = b.addOptions();
     opts.addOption([]const u8, "program_name", "clogite");
     opts.addOption(std.SemanticVersion, "program_version", std.SemanticVersion.parse("0.0.0") catch unreachable);
+
+    const skip_rust = b.option(bool, "skip-rust", "Skip compiling the Rust bundle (provided externally)") orelse false;
+    const bundle_lib_path = b.option([]const u8, "bundle-lib-path", "Path to the pre-compiled bundle directory");
+
+    if (skip_rust and bundle_lib_path == null) {
+        std.debug.print("Cannot skip rust withiout providing the bundle lib path for linking", .{});
+        std.process.exit(1);
+    }
 
     const sqlite = b.dependency("sqlite", .{ .target = target, .optimize = optimize, .fts5 = true });
     const vaxis = b.dependency("vaxis", .{ .target = target, .optimize = optimize });
@@ -100,70 +106,84 @@ pub fn build(b: *std.Build) void {
     });
     exe.lto = .full;
 
-    const zstd_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-zstd" });
-    const patch_zstd_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type = \\[\"cdylib\"\\]/crate-type = [\"staticlib\", \"cdylib\"]/", b.pathJoin(&.{ zstd_path, "Cargo.toml" }) });
-    const patch_zstd_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info/d", b.pathJoin(&.{ zstd_path, "src", "create_extension.rs" }) });
-    
-    const regex_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-regex" });
-    const patch_regex_static = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type =/crate-type = [\"staticlib\", \"cdylib\"]/", b.pathJoin(&.{ regex_path, "Cargo.toml" }) });
+    if (!skip_rust) {
+        const vendor_urls = [_][]const u8{ "https://github.com/phiresky/sqlite-zstd.git", "https://github.com/asg017/sqlite-regex.git", "https://github.com/asg017/sqlite-loadable-rs" };
+        const bundle_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-bundle" });
+        const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", b.pathJoin(&.{ bundle_path, "Cargo.toml" }) });
+        cargo_build.has_side_effects = true;
+        cargo_build.setEnvironmentVariable("LIBSQLITE3_SYS_USE_PKG_CONFIG", "1");
+        for (vendor_urls) |url| {
+            const last_slash = std.mem.lastIndexOfScalar(u8, url, '/') orelse 0;
+            const start_idx = if (last_slash > 0) last_slash + 1 else 0;
 
-    if (sqlite_zstd_path) |path| {
-        mod.addLibraryPath(.{ .cwd_relative = path });
-        mod.linkSystemLibrary("sqlite_zstd", .{ .preferred_link_mode = .static });
+            const dot_git = std.mem.lastIndexOf(u8, url, ".git") orelse url.len;
 
-        mod.linkSystemLibrary("gcc_s", .{});
-        if (target.result.os.tag != .windows) {
-            mod.linkSystemLibrary("pthread", .{});
-            mod.linkSystemLibrary("dl", .{});
-            mod.linkSystemLibrary("m", .{});
+            const name = url[start_idx..dot_git];
+
+            var dir_exists = true;
+            b.build_root.handle.access(b.graph.io, b.pathJoin(&.{ "vendor", name }), .{}) catch |e| switch (e) {
+                error.FileNotFound => dir_exists = false,
+                else => dir_exists = true,
+            };
+
+            const build_path = try b.build_root.join(b.allocator, &.{ "vendor", name });
+            defer b.allocator.free(build_path);
+
+            const download = if (!dir_exists)
+                b.addSystemCommand(&.{ "git", "clone", "--depth", "1", url, build_path })
+            else blk: {
+                const pull_cmd = b.addSystemCommand(&.{ "git", "pull" });
+                pull_cmd.setCwd(b.path(b.pathJoin(&.{ "vendor", name })));
+                break :blk pull_cmd;
+            };
+
+            const ctoml_path = b.pathJoin(&.{ build_path, "Cargo.toml" });
+
+            const patch_rlib = b.addSystemCommand(&.{ "sed", "-i", "s/crate-type.*/crate-type = [\"rlib\"]/", ctoml_path });
+            patch_rlib.step.dependOn(&download.step);
+            patch_rlib.has_side_effects = true;
+
+            if (std.mem.count(u8, url, "zstd") > 0) {
+                const patch_bundle = b.addSystemCommand(&.{ "sed", "-i", "s/features = \\[\"functions\".*/features = [\"functions\", \"blob\", \"array\"]/", ctoml_path });
+                patch_bundle.step.dependOn(&download.step);
+                patch_bundle.has_side_effects = true;
+                cargo_build.step.dependOn(&patch_bundle.step);
+
+                const patch_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info!/d", b.pathJoin(&.{ build_path, "src", "create_extension.rs" }) });
+                patch_log.step.dependOn(&download.step);
+                patch_log.has_side_effects = true;
+                cargo_build.step.dependOn(&patch_log.step);
+
+            } else if (std.mem.count(u8, url, "regex") > 0) {
+                const patch_loadable = b.addSystemCommand(&.{ "sed", "-i", "s|sqlite-loadable.*|sqlite-loadable = { path = \"../../vendor/sqlite-loadable-rs\"}|", ctoml_path });
+                patch_loadable.step.dependOn(&download.step);
+                patch_loadable.has_side_effects = true;
+                cargo_build.step.dependOn(&patch_loadable.step);
+
+                const patch_tuple = b.addSystemCommand(&.{ "sed", "-i", "s/scalar_function_raw(\\([^)]*\\))\\([^.]\\)/scalar_function_raw(\\1).0\\2/g", b.pathJoin(&.{ build_path, "src", "captures.rs" }) });
+                patch_tuple.step.dependOn(&download.step);
+                patch_tuple.has_side_effects = true;
+                cargo_build.step.dependOn(&patch_tuple.step);
+            } else if (std.mem.count(u8, url, "sqlite-loadable") > 0) {
+                const patch_bundled = b.addSystemCommand(&.{ "sed", "-i", "s/bundled//g", ctoml_path });
+                patch_bundled.step.dependOn(&download.step);
+                patch_bundled.has_side_effects = true;
+                cargo_build.step.dependOn(&patch_bundled.step);
+            }
+
+            cargo_build.step.dependOn(&patch_rlib.step);
         }
+        exe.step.dependOn(&cargo_build.step);
+        mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ bundle_path, "target", "release" }) });
     } else {
-        installRustCrate(
-        b,
-        mod,
-        target,
-        exe,
-        "https://github.com/phiresky/sqlite-zstd",
-        &.{ patch_zstd_static, patch_zstd_log },
-        false,
-        &.{ "gcc_s" },
-        null,
-        &.{ "build_extension" },
-        null,
-    ) catch |e| {
-            std.log.err("Failed to install sqlite-zstd rust crate: {any}", .{e});
-            return;
-        };
+        mod.addLibraryPath(.{ .cwd_relative = bundle_lib_path.? });
     }
-
-    if (sqlite_regex_path) |path| {
-        mod.addLibraryPath(.{ .cwd_relative = path });
-        mod.linkSystemLibrary("sqlite_regex", .{ .preferred_link_mode = .dynamic });
-
-        exe.root_module.addRPath(.{ .cwd_relative = regex_path });
-
-        if (target.result.os.tag != .windows) {
-            mod.linkSystemLibrary("pthread", .{});
-            mod.linkSystemLibrary("dl", .{});
-            mod.linkSystemLibrary("m", .{});
-        }
-    } else {
-        installRustCrate(
-        b,
-        mod,
-        target,
-        exe,
-        "https://github.com/asg017/sqlite-regex",
-        &.{ patch_regex_static },
-        true, // As I cannot find a way to reliably and correctly statically link 2 rust libraries due to their stdlib bundling method
-        null,
-        null,
-        null,
-        null,
-    ) catch |e| {
-            std.log.err("Failed to install sqlite-regex rust crate: {any}", .{e});
-            return;
-        };
+    mod.linkSystemLibrary("sqlite_bundle", .{ .preferred_link_mode = .static });
+    mod.linkSystemLibrary("gcc_s", .{});
+    if (target.result.os.tag != .windows) {
+        mod.linkSystemLibrary("pthread", .{});
+        mod.linkSystemLibrary("dl", .{});
+        mod.linkSystemLibrary("m", .{});
     }
 
     // This declares intent for the executable to be installed into the
@@ -236,83 +256,4 @@ pub fn build(b: *std.Build) void {
     //
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
-}
-
-inline fn repoNameFromUrl(alloc: std.mem.Allocator, url: []const u8) ?[]const u8 {
-    var it = std.mem.splitSequence(u8, url, "/");
-    _ = it.next(); // Skip https
-    _ = it.next(); // Skip //
-    _ = it.next(); // Skip github
-    _ = it.next(); // Skip owner
-
-    const repo = it.next() orelse return null;
-    const clean_repo = if (std.mem.endsWith(u8, repo, ".git")) repo[0 .. repo.len - 4] else repo;
-    return alloc.dupe(u8, clean_repo) catch null;
-}
-
-fn installRustCrate(
-    b: *std.Build,
-    mod: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-    exe: *std.Build.Step.Compile,
-    repo_url: []const u8,
-    patches: ?[]const *std.Build.Step.Run,
-    dynamic: bool,
-    extra_system_libs: ?[]const []const u8,
-    relative_cargo_path: ?[]const u8,
-    features: ?[]const []const u8,
-    custom_lib_dir: ?[]const []const u8,
-) !void {
-    const alloc = b.allocator;
-    const name = repoNameFromUrl(alloc, repo_url) orelse repo_url;
-    defer if (std.mem.eql(u8, name, repo_url)) alloc.free(name);
-    const build_path = b.pathJoin(&.{ b.build_root.path.?, "deps", name});
-    const cargo_toml = b.pathJoin(&.{ build_path, relative_cargo_path orelse "Cargo.toml" });
-    const check_and_clone = b.addSystemCommand(&.{
-        "sh", "-c",
-        b.fmt("if [ ! -d {s} ]; then git clone --depth 1 {s} {s}; fi", .{
-            build_path, repo_url, build_path,
-        }),
-    });
-    check_and_clone.has_side_effects = true;
-    const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", cargo_toml });
-    if (features) |f| {
-        for (f) |feature| {
-            cargo_build.addArgs(&.{ "--features", feature });
-        }
-    }
-
-    if (patches) |p| {
-        for (p) |patch| {
-            patch.step.dependOn(&check_and_clone.step);
-            cargo_build.step.dependOn(&patch.step);
-        }
-    }
-    exe.step.dependOn(&cargo_build.step);
-
-    const lib_dir: []const u8 = if (custom_lib_dir) |cld| blk: {
-        const paths = try alloc.alloc([]const u8, cld.len + 1);
-        defer alloc.free(paths);
-
-        paths[0] = build_path;
-        @memcpy(paths[1..], cld);
-
-        break :blk b.pathJoin(paths);
-    } else b.pathJoin(&.{ build_path, "target", "release" });
-    mod.addLibraryPath(.{ .cwd_relative = lib_dir });
-    const replace_name = try alloc.dupe(u8, name);
-    std.mem.replaceScalar(u8, replace_name, '-', '_');
-    defer alloc.free(replace_name);
-    mod.linkSystemLibrary(replace_name, .{ .preferred_link_mode = if (dynamic) .dynamic else .static});
-
-    if (target.result.os.tag != .windows) {
-        mod.linkSystemLibrary("pthread", .{});
-        mod.linkSystemLibrary("dl", .{});
-        mod.linkSystemLibrary("m", .{});
-        if (extra_system_libs) |esl| {
-            for (esl) |lib| {
-                mod.linkSystemLibrary(lib, .{});
-            }
-        }
-    }
 }

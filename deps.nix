@@ -11,11 +11,11 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "sqlite-3.48.0-F2R_ayuQDgATJL_BQ-5jv8zuzgnGwZ8ZDuhecttteNci";
+    name = "sqlite-3.48.0-F2R_azCQDgBGaWDIX4g2vxKpuqzYEQOOfAeJGMNocPu0";
     path = fetchgit {
       url = "https://github.com/vrischmann/zig-sqlite";
-      rev = "2051af63d6c34bbbc40bb39945d188acdb132eb9";
-      hash = "sha256-aqugNPEsFJApaasPxXDpC20dK//0f5b02zePVUfcXVw=";
+      rev = "946d77c526258760b52836187af32d1a192c5d36";
+      hash = "sha256-gl1+qQl1uv9HsT9X4EOTQ+jwKHXQQZdvAx5x4HMAUfI=";
     };
   }
   {

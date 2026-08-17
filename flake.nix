@@ -11,6 +11,10 @@
       url = "github:asg017/sqlite-regex";
       flake = false;
     };
+    sqlite-loadable-rs = {
+      url = "github:asg017/sqlite-loadable-rs";
+      flake = false;
+    };
   };
 
   outputs =
@@ -19,6 +23,7 @@
       nixpkgs,
       sqlite-zstd,
       sqlite-regex,
+      sqlite-loadable-rs,
     }:
     let
       supportedSystems = [
@@ -34,88 +39,66 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-
           zig-deps = pkgs.callPackage ./deps.nix { };
 
-          sqlite-zstd-lib = pkgs.rustPlatform.buildRustPackage {
-            pname = "sqlite-zstd";
-            version = "git";
-            src = sqlite-zstd;
+          sqlite-bundle = pkgs.rustPlatform.buildRustPackage {
+            pname = "sqlite-bundle";
+            version = "0.0.0";
+
+            src = ./deps/sqlite-bundle;
 
             cargoLock = {
-              lockFile = "${sqlite-zstd}/Cargo.lock";
-              allowBuiltinFetchGit = true;
+              lockFile = ./deps/sqlite-bundle/Cargo.lock;
             };
 
             doCheck = false;
 
             nativeBuildInputs = with pkgs; [
-              git
-              sqlite
               pkg-config
-            ];
-
-            buildInputs = with pkgs; [
-              sqlite
               clang-tools
+            ];
+            buildInputs = with pkgs; [
+              sqlite.dev
               llvmPackages.libclang.lib
             ];
 
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.getVersion pkgs.clang}/include -isystem ${pkgs.glibc.dev}/include";
-            RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+            PKG_CONFIG_PATH = "${pkgs.sqlite.dev}/lib/pkgconfig";
 
-            postPatch = ''
-              sed -i 's/crate-type = \["cdylib"\]/crate-type = ["staticlib", "cdylib"]/' Cargo.toml
-              sed -i '/log::info/d' src/create_extension.rs
+            prePatch = ''
+              mkdir -p vendor
+              cp -r ${sqlite-zstd} vendor/sqlite-zstd
+              cp -r ${sqlite-regex} vendor/sqlite-regex
+              cp -r ${sqlite-loadable-rs} vendor/sqlite-loadable-rs
+              chmod -R +w vendor/
             '';
 
-            buildFeatures = [ "build_extension" ];
-
-            postInstall = ''
-              mkdir -p $out/lib
-              cp target/*/release/libsqlite_zstd.* $out/lib/
-            '';
-          };
-
-          sqlite-regex-lib = pkgs.rustPlatform.buildRustPackage {
-            pname = "sqlite-regex";
-            version = "git";
-            src = sqlite-regex;
-
-            cargoLock = {
-              lockFile = "${sqlite-regex}/Cargo.lock";
-              allowBuiltinFetchGit = true;
-            };
-
-            doCheck = false;
-
-            nativeBuildInputs = with pkgs; [
-              git
-              sqlite
-              pkg-config
-            ];
-
-            buildInputs = with pkgs; [
-              sqlite
-              clang-tools
-              llvmPackages.libclang.lib
-            ];
-
-            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-            BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.getVersion pkgs.clang}/include -isystem ${pkgs.glibc.dev}/include";
-            RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-
             postPatch = ''
-              	      if [ -f build.rs ]; then
-              		echo 'fn main() { println!("cargo:rustc-env=GIT_HASH=${sqlite-regex.rev or "unknown"}"); }' > build.rs
-              	      fi
-                            sed -i 's/crate-type =/crate-type = ["staticlib", "cdylib"]/' Cargo.toml
+              sed -i 's|../../vendor/|./vendor/|g' Cargo.toml
+
+              cat > vendor/sqlite-regex/build.rs <<'EOF'
+              fn main() {
+                  println!("cargo:rustc-env=GIT_HASH={}", 
+                           std::env::var("GIT_HASH").unwrap_or_else(|_| "unknown".to_string()));
+              }
+              EOF
+
+              sed -i 's/crate-type.*/crate-type = ["rlib"]/' vendor/sqlite-zstd/Cargo.toml
+              sed -i 's/features = \["functions".*/features = ["functions", "blob", "array"]/' vendor/sqlite-zstd/Cargo.toml
+              sed -i '/log::info!/d' vendor/sqlite-zstd/src/create_extension.rs
+
+              sed -i 's/crate-type.*/crate-type = ["rlib"]/' vendor/sqlite-regex/Cargo.toml
+              sed -i 's|sqlite-loadable.*|sqlite-loadable = { path = "../../vendor/sqlite-loadable-rs"}|' vendor/sqlite-regex/Cargo.toml
+              sed -i 's/scalar_function_raw(\([^)]*\))\([^.]\)/scalar_function_raw(\1).0\2/g' vendor/sqlite-regex/src/captures.rs
+
+              sed -i 's/crate-type.*/crate-type = ["rlib"]/' vendor/sqlite-loadable-rs/Cargo.toml
+              sed -i 's/bundled//g' vendor/sqlite-loadable-rs/Cargo.toml
             '';
 
             postInstall = ''
               mkdir -p $out/lib
-              cp target/*/release/libsqlite_regex.* $out/lib/
+              cp target/*/release/libsqlite_bundle.a $out/lib/
             '';
           };
 
@@ -129,9 +112,8 @@
             nativeBuildInputs = [ pkgs.zig.hook ];
 
             buildInputs = [
-              pkgs.sqlite
-              sqlite-zstd-lib
-              sqlite-regex-lib
+              pkgs.sqlite.dev
+              sqlite-bundle
             ];
 
             preBuild = ''
@@ -142,8 +124,8 @@
             zigBuildFlags = [
               "--system"
               "${zig-deps}"
-              "-Dsqlite-zstd-lib-path=${sqlite-zstd-lib}/lib"
-              "-Dsqlite-regex-lib-path=${sqlite-regex-lib}/lib"
+              "-Dskip-rust=true"
+              "-Dbundle-lib-path=${sqlite-bundle}/lib"
             ];
           };
         }
@@ -161,7 +143,7 @@
               cargo
               rustc
               rustPlatform.rustLibSrc
-              sqlite
+              sqlite.dev
               git
               clang-tools
               llvmPackages.libclang.lib
@@ -170,6 +152,7 @@
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.getVersion pkgs.clang}/include -isystem ${pkgs.glibc.dev}/include";
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+            PKG_CONFIG_PATH = "${pkgs.sqlite.dev}/lib/pkgconfig";
           };
         }
       );
