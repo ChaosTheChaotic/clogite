@@ -27,11 +27,11 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "vaxis-0.6.0-BWNV_C75CQAK-GVdeEw41oYi65WqsXybxCW6hlIzozNy";
+    name = "vaxis-0.6.0-BWNV_FcoCgB3Q_LTiQet_GeS23Bd7e224eHloS8PanKZ";
     path = fetchgit {
       url = "https://github.com/rockorager/libvaxis";
-      rev = "762f325d31a92fd2dc83aa1899a412fb1b6f020d";
-      hash = "sha256-sZYa4CTsCgWZA/dFNAWQVZpJwfZluVsIeCKqY2KVyMY=";
+      rev = "6cab03f8a3faeb58bddf334343889a7f685ba7a7";
+      hash = "sha256-xkZkeTZN3qyQWtjZmNFkyH9S73R21MLUOnunuaJbwRc=";
     };
   }
   {
