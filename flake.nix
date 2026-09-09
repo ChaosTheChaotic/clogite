@@ -33,8 +33,78 @@
         "aarch64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+
+      clogiteOptions =
+        lib: with lib; {
+          enable = mkEnableOption "Clogite shell history manager";
+					package = mkOption {
+						type = types.package;
+						default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+						description = "The clogite package to install";
+					};
+          keepHistfile = mkOption {
+            type = types.bool;
+            default = false;
+            description = "Keep standard Zsh history file.";
+          };
+          modifyZshAutosuggestions = mkOption {
+            type = types.bool;
+            default = false;
+            description = "Use Clogite for zsh-autosuggestions.";
+          };
+        };
+
+      mkZshInit = cfg: ''
+        if typeset -p zvm_after_init_commands >/dev/null 2>&1; then
+          zvm_after_init_commands+=('eval "$(clogite init ${if cfg.keepHistfile then "true" else "false"} ${
+            if cfg.modifyZshAutosuggestions then "true" else "false"
+          })"')
+        else
+          eval "$(clogite init ${if cfg.keepHistfile then "true" else "false"} ${
+            if cfg.modifyZshAutosuggestions then "true" else "false"
+          })"
+        fi
+      '';
     in
     {
+      nixosModules.default =
+        {
+          config,
+          lib,
+          ...
+        }:
+        let
+          cfg = config.programs.clogite;
+        in
+        {
+          options.programs.clogite = clogiteOptions lib;
+
+          config = lib.mkIf cfg.enable {
+            environment.systemPackages = [ cfg.package ];
+
+            programs.zsh.interactiveShellInit = mkZshInit cfg;
+          };
+        };
+
+      homeManagerModules.default =
+        {
+          config,
+          lib,
+          ...
+        }:
+        let
+          cfg = config.programs.clogite;
+        in
+        {
+          options.programs.clogite = clogiteOptions lib;
+
+          config = lib.mkIf cfg.enable {
+            home.packages = [ cfg.package ];
+
+            programs.zsh.initContent = mkZshInit cfg;
+          };
+        };
+
       packages = forAllSystems (
         system:
         let

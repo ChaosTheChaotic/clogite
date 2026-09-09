@@ -212,3 +212,22 @@ pub fn searchCommands(ctxi: *ctx.Ctx, alloc: std.mem.Allocator, term: []const u8
         return &[_]Cmd{};
     };
 }
+
+pub fn getSuggestion(ctxi: *ctx.Ctx, pfx: []const u8) !?[]const u8 {
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
+
+    var stmt = try db.prepare(
+        \\SELECT content FROM commands
+        \\WHERE content LIKE ?
+        \\ORDER BY last_run_at DESC LIMIT 1
+    );
+    defer stmt.deinit();
+
+    const like_pfx = try std.fmt.allocPrint(ctxi.alloc, "{s}%", .{pfx});
+    defer ctxi.alloc.free(like_pfx);
+
+    if (try stmt.oneAlloc(struct { content: []const u8}, ctxi.alloc, .{}, .{like_pfx})) |row| {
+        return row.content;
+    }
+    return null;
+}

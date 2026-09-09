@@ -8,6 +8,7 @@ const SubCmd = enum {
     remove,
     view,
     init,
+    suggest,
 
     pub fn parse(str: []const u8) ?SubCmd {
         if (std.mem.eql(u8, str, "rem")) {
@@ -24,10 +25,11 @@ fn print_help(io: std.Io) !void {
         \\Usage:
         \\  clogite add "<command>" <exit_code> <duration_ms>
         \\  clogite rem "<command>"
-        \\  clogite init
+        \\  clogite init <keep_histfile> <modify_zsh_autosuggestions>
         \\  clogite view
         \\  clogite version
         \\  clogite help
+        \\  clogite suggest "<pfx>"
         \\
         \\Options:
         \\  add          Log a new command execution.
@@ -35,6 +37,7 @@ fn print_help(io: std.Io) !void {
         \\  init         Adds the needed commands for zsh to integrate the program properly.
         \\  view         Open the TUI to search and view history.
         \\  version      Show program version.
+        \\  suggest      Suggests a command to run based on a prefix
         \\
         \\TUI Keybinds:
         \\  ↑ / ↓        Navigate command history 
@@ -47,9 +50,16 @@ fn print_help(io: std.Io) !void {
     , .{});
 }
 
-fn errSub(sub: []const u8) noreturn {
+inline fn errSub(sub: []const u8) noreturn {
     std.log.err("clogite {s} requires a command, an exit code and a duration (in ms)", .{sub});
     std.process.exit(22);
+}
+
+fn parseBool(str: []const u8) bool {
+    if (std.mem.eql(u8, str, "true") or std.mem.eql(u8, str, "1") or std.mem.eql(u8, str, "yes")) {
+        return true;
+    }
+    return false;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -119,6 +129,8 @@ pub fn main(init: std.process.Init) !void {
             return;
         },
         .init => {
+            var stdout = std.Io.File.stdout().writer(init.io, &.{});
+
             const zsh_init_script =
                 \\zmodload zsh/datetime
                 \\
@@ -169,12 +181,45 @@ pub fn main(init: std.process.Init) !void {
                 \\zle -N __clogite_history_widget
                 \\bindkey '\e[A' __clogite_history_widget
                 \\bindkey '\eOA' __clogite_history_widget
+                \\
             ;
-            var stdout = std.Io.File.stdout().writer(init.io, &.{});
-
             try stdout.interface.writeAll(zsh_init_script);
+
+            if (!parseBool(args.next() orelse "false")) {
+                const zsh_disable_histfile =
+                    \\unset HISTFILE
+                    \\SAVEHIST=0
+                    \\HISTSIZE=1000
+                    \\
+                ;
+                try stdout.interface.writeAll(zsh_disable_histfile);
+            }
+            if (parseBool(args.next() orelse "false")) {
+                const zsh_mod_autosuggestions =
+                    \\_zsh_autosuggest_strategy_clogite() {
+                    \\    local query="$1"
+                    \\    suggestion=$(clogite suggest "$query" 2>/dev/null)
+                    \\}
+                    \\
+                    \\export ZSH_AUTOSUGGEST_STRATEGY=(clogite completion)
+                    \\
+                ;
+                try stdout.interface.writeAll(zsh_mod_autosuggestions);
+            }
             try stdout.interface.flush();
             return;
+        },
+        .suggest => {
+            ctx.db = try clogite.db.initDb(ctx);
+            const pfx = args.next() orelse {
+                std.log.err("The suggest command requires passing in a pattern", .{});
+                std.process.exit(22);
+            };
+            if (try clogite.cmds.getSuggestion(&ctx, pfx)) |suggestion| {
+                var stdout = std.Io.File.stdout().writer(init.io, &.{});
+                try stdout.interface.writeAll(suggestion);
+                try stdout.interface.flush();
+            }
         },
     }
 }
