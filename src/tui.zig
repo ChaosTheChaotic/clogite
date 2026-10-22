@@ -24,6 +24,12 @@ const Screen = enum {
     info,
 };
 
+const SearchInfo = struct {
+    term: []const u8,
+    regex: bool,
+    case: bool,
+};
+
 fn formatAgo(io: std.Io, alloc: std.mem.Allocator, timestamp: i64) ![]const u8 {
     const diff = std.Io.Clock.real.now(io).toSeconds() - timestamp;
     if (diff < 60)
@@ -62,8 +68,8 @@ fn formatDuration(alloc: std.mem.Allocator, duration_ms: i64) ![]const u8 {
     return try alloc.print("{d}d {d}h", .{ d, h });
 }
 
-fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize, search_term: []const u8, case_insensitive: bool) ![]const []const vaxis.Cell.Segment {
-    const cmd_highlighted = try highlightZsh(alloc, content, is_selected, search_term, case_insensitive);
+fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize, search_info: ?SearchInfo) ![]const []const vaxis.Cell.Segment {
+    const cmd_highlighted = try highlightZsh(alloc, content, is_selected, search_info);
 
     var wrapped_lines: std.ArrayList([]const vaxis.Cell.Segment) = .empty;
     var current_line: std.ArrayList(vaxis.Cell.Segment) = .empty;
@@ -113,7 +119,7 @@ fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool,
     return try wrapped_lines.toOwnedSlice(alloc);
 }
 
-fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, search_term: []const u8, case_insensitive: bool) ![]vaxis.Cell.Segment {
+fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, search_info: ?SearchInfo) ![]vaxis.Cell.Segment {
     const sel_bg: vaxis.Color = if (is_selected) .{ .index = @backingInt(Colors.gray) } else .default;
     const styles = try alloc.alloc(vaxis.Style, content.len);
     defer alloc.free(styles);
@@ -213,20 +219,24 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
             i += 1;
         }
     }
-    if (search_term.len > 0) {
-        var s_idx: usize = 0;
-        while (s_idx < content.len) {
-            const slice = content[s_idx..];
-            const match_offset = if (case_insensitive)
-                std.ascii.findIgnoreCase(slice, search_term)
-            else
-                std.mem.indexOf(u8, slice, search_term);
+    if (search_info) |info| {
+        if (info.term.len > 0) {
+            if (info.regex == false) {
+                var s_idx: usize = 0;
+                while (s_idx < content.len) {
+                    const slice = content[s_idx..];
+                    const match_offset = if (info.case)
+                        std.ascii.findIgnoreCase(slice, info.term)
+                    else
+                        std.mem.indexOf(u8, slice, info.term);
 
-            if (match_offset) |offset| {
-                const idx = s_idx + offset;
-                for (styles[idx .. idx + search_term.len]) |*s| s.reverse = true;
-                s_idx = idx + search_term.len;
-            } else break;
+                    if (match_offset) |offset| {
+                        const idx = s_idx + offset;
+                        for (styles[idx .. idx + info.term.len]) |*s| s.reverse = true;
+                        s_idx = idx + info.term.len;
+                    } else break;
+                }
+            } else {}
         }
     }
 
@@ -247,6 +257,27 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
     }
 
     return try segments.toOwnedSlice(alloc);
+}
+
+inline fn parseSearch(term: []const u8) ?SearchInfo {
+    var actual_search: []const u8 = "";
+    var case_insensitive = false;
+
+    if (term.len > 0) {
+        actual_search = term;
+        var regex = true;
+
+        while (actual_search.len >= 2 and actual_search[0] == '\\') {
+            if (actual_search[1] == 'c') {
+                case_insensitive = true;
+                actual_search = actual_search[2..];
+            } else if (actual_search[1] == 'f') {
+                regex = false;
+                actual_search = actual_search[2..];
+            } else break;
+        }
+        return SearchInfo{ .term = actual_search, .case = case_insensitive, .regex = regex };
+    } else return null;
 }
 
 pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
@@ -300,27 +331,11 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
 
         const search = try std.mem.concat(aa, u8, &.{ text_input.buf.firstHalf(), text_input.buf.secondHalf() });
 
-        var actual_search: []const u8 = "";
-        var case_insensitive = false;
-
-        if (search.len > 0) {
-            actual_search = search;
-            var regex = true;
-
-            while (actual_search.len >= 2 and actual_search[0] == '\\') {
-                if (actual_search[1] == 'c') {
-                    case_insensitive = true;
-                    actual_search = actual_search[2..];
-                } else if (actual_search[1] == 'f') {
-                    regex = false;
-                    actual_search = actual_search[2..];
-                } else break;
-            }
-
-            history = try cmds.searchCommands(ctxi, aa, actual_search, case_insensitive, regex);
-        } else {
+        const search_info = parseSearch(search);
+        if (search_info) |info|
+            history = try cmds.searchCommands(ctxi, aa, info.term, info.case, info.regex)
+        else
             history = try cmds.getCommands(aa, &db, null);
-        }
 
         if (displayed_screen == .history) {
             const search_win = win.child(.{
@@ -355,12 +370,12 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 } else {
                     var total_lines_to_selection: usize = 0;
                     for (history[scroll_offset..@intCast(selected_idx + 1)]) |item| {
-                        const wrapped = try wrapCommand(aa, item.content, false, cmd_max_width, actual_search, case_insensitive);
+                        const wrapped = try wrapCommand(aa, item.content, false, cmd_max_width, search_info);
                         total_lines_to_selection += wrapped.len;
                     }
 
                     while (total_lines_to_selection > usable_height and scroll_offset < @as(usize, @intCast(selected_idx))) {
-                        const top_wrapped = try wrapCommand(aa, history[scroll_offset].content, false, cmd_max_width, actual_search, case_insensitive);
+                        const top_wrapped = try wrapCommand(aa, history[scroll_offset].content, false, cmd_max_width, search_info);
                         total_lines_to_selection -= top_wrapped.len;
                         scroll_offset += 1;
                     }
@@ -394,7 +409,7 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 const ago_text = try aa.print("{s:>10} ", .{ago_str});
                 const dur_text = try aa.print("{s:>8} ", .{dur_str});
 
-                const wrapped = try wrapCommand(aa, cmd.content, is_selected, cmd_max_width, actual_search, case_insensitive);
+                const wrapped = try wrapCommand(aa, cmd.content, is_selected, cmd_max_width, search_info);
                 const lines_count = wrapped.len;
 
                 for (wrapped, 0..) |line_segs, l| {
@@ -453,7 +468,7 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 _ = detail_win.print(&.{.{ .text = "Command:", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
                 row += 1;
 
-                const cmd_wrapped = try wrapCommand(aa, d.cmd.content, false, detail_win.width - (margin * 2), "", false);
+                const cmd_wrapped = try wrapCommand(aa, d.cmd.content, false, detail_win.width - (margin * 2), SearchInfo{ .term = "", .case = false, .regex = false });
                 for (cmd_wrapped) |line| {
                     _ = detail_win.print(line, .{ .row_offset = row, .col_offset = margin + 1 });
                     row += 1;
