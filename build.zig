@@ -108,7 +108,7 @@ pub fn build(b: *std.Build) !void {
 
     if (!skip_rust) {
         const vendor_urls = [_][]const u8{ "https://github.com/phiresky/sqlite-zstd.git", "https://github.com/asg017/sqlite-regex.git", "https://github.com/asg017/sqlite-loadable-rs" };
-        const bundle_path = b.pathJoin(&.{ b.build_root.path.?, "deps", "sqlite-bundle" });
+        const bundle_path = b.pathJoin(&.{ b.root.root_dir.path.?, "deps", "sqlite-bundle" });
         const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", b.pathJoin(&.{ bundle_path, "Cargo.toml" }) });
         cargo_build.has_side_effects = true;
         cargo_build.setEnvironmentVariable("LIBSQLITE3_SYS_USE_PKG_CONFIG", "1");
@@ -121,12 +121,12 @@ pub fn build(b: *std.Build) !void {
             const name = url[start_idx..dot_git];
 
             var dir_exists = true;
-            b.build_root.handle.access(b.graph.io, b.pathJoin(&.{ "vendor", name }), .{}) catch |e| switch (e) {
+            b.root.root_dir.handle.access(b.graph.io, b.pathJoin(&.{ "vendor", name }), .{}) catch |e| switch (e) {
                 error.FileNotFound => dir_exists = false,
                 else => dir_exists = true,
             };
 
-            const build_path = try b.build_root.join(b.allocator, &.{ "vendor", name });
+            const build_path = try b.root.root_dir.join(b.allocator, &.{ "vendor", name });
             defer b.allocator.free(build_path);
 
             const download = if (!dir_exists)
@@ -214,9 +214,7 @@ pub fn build(b: *std.Build) !void {
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     // Creates an executable that will run `test` blocks from the provided module.
     // Here `mod` needs to define a target, which is why earlier we made sure to

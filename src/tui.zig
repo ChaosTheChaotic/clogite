@@ -27,39 +27,39 @@ const Screen = enum {
 fn formatAgo(io: std.Io, alloc: std.mem.Allocator, timestamp: i64) ![]const u8 {
     const diff = std.Io.Clock.real.now(io).toSeconds() - timestamp;
     if (diff < 60)
-        return try std.fmt.allocPrint(alloc, "{d}s ago", .{diff})
+        return try alloc.print("{d}s ago", .{diff})
     else if (diff < 3600)
-        return try std.fmt.allocPrint(alloc, "{d}m ago", .{@divTrunc(diff, 60)})
+        return try alloc.print("{d}m ago", .{@divTrunc(diff, 60)})
     else if (diff < 86400)
-        return try std.fmt.allocPrint(alloc, "{d}h ago", .{@divTrunc(diff, 3600)})
+        return try alloc.print("{d}h ago", .{@divTrunc(diff, 3600)})
     else if (diff < 31536000)
-        return try std.fmt.allocPrint(alloc, "{d}d ago", .{@divTrunc(diff, 86400)})
+        return try alloc.print("{d}d ago", .{@divTrunc(diff, 86400)})
     else
-        return try std.fmt.allocPrint(alloc, "{d}y ago", .{@divTrunc(diff, 31536000)});
+        return try alloc.print("{d}y ago", .{@divTrunc(diff, 31536000)});
 }
 
 fn formatDuration(alloc: std.mem.Allocator, duration_ms: i64) ![]const u8 {
     if (duration_ms < 1000) {
-        return try std.fmt.allocPrint(alloc, "{d}ms", .{duration_ms});
+        return try alloc.print("{d}ms", .{duration_ms});
     }
 
     const total_s = @divTrunc(duration_ms, 1000);
 
-    if (total_s < 60) return try std.fmt.allocPrint(alloc, "{d:.2}s", .{@as(f64, @floatFromInt(duration_ms)) / 1000.0});
+    if (total_s < 60) return try alloc.print("{d:.2}s", .{@as(f64, @floatFromInt(duration_ms)) / 1000.0});
 
     const s = @rem(total_s, 60);
     const total_m = @divTrunc(total_s, 60);
 
-    if (total_m < 60) return try std.fmt.allocPrint(alloc, "{d}m {d}s", .{ total_m, s });
+    if (total_m < 60) return try alloc.print("{d}m {d}s", .{ total_m, s });
 
     const m = @rem(total_m, 60);
     const total_h = @divTrunc(total_m, 60);
 
-    if (total_h < 24) return try std.fmt.allocPrint(alloc, "{d}h {d}m", .{ total_h, m });
+    if (total_h < 24) return try alloc.print("{d}h {d}m", .{ total_h, m });
 
     const h = @rem(total_h, 24);
     const d = @divTrunc(total_h, 24);
-    return try std.fmt.allocPrint(alloc, "{d}d {d}h", .{ d, h });
+    return try alloc.print("{d}d {d}h", .{ d, h });
 }
 
 fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, cmd_max_width: usize, search_term: []const u8, case_insensitive: bool) ![]const []const vaxis.Cell.Segment {
@@ -114,7 +114,7 @@ fn wrapCommand(alloc: std.mem.Allocator, content: []const u8, is_selected: bool,
 }
 
 fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool, search_term: []const u8, case_insensitive: bool) ![]vaxis.Cell.Segment {
-    const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
+    const sel_bg: vaxis.Color = if (is_selected) .{ .index = @backingInt(Colors.gray) } else .default;
     const styles = try alloc.alloc(vaxis.Style, content.len);
     defer alloc.free(styles);
     @memset(styles, .{ .bg = sel_bg });
@@ -131,10 +131,10 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
         var style: vaxis.Style = .{ .bg = sel_bg };
 
         if (content[i] == '-' and !is_first_token) {
-            style.fg = .{ .index = @intFromEnum(Colors.cyan) };
+            style.fg = .{ .index = @backingInt(Colors.cyan) };
             while (i + len < content.len and !std.ascii.isWhitespace(content[i + len])) : (len += 1) {}
         } else if (content[i] == '"' or content[i] == '\'') {
-            style.fg = .{ .index = @intFromEnum(Colors.yellow) };
+            style.fg = .{ .index = @backingInt(Colors.yellow) };
             const quote = content[i];
             len = 1;
             while (i + len < content.len) : (len += 1) {
@@ -147,7 +147,7 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
             }
         } else {
             if (is_first_token) {
-                style.fg = .{ .index = @intFromEnum(Colors.green) };
+                style.fg = .{ .index = @backingInt(Colors.green) };
                 style.bold = true;
             }
             while (i + len < content.len and !std.ascii.isWhitespace(content[i + len])) : (len += 1) {}
@@ -207,7 +207,7 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
         }
 
         if (len > 0) {
-            for (styles[i .. i + len]) |*s| s.fg = .{ .index = @intFromEnum(Colors.magenta) };
+            for (styles[i .. i + len]) |*s| s.fg = .{ .index = @backingInt(Colors.magenta) };
             i += len;
         } else {
             i += 1;
@@ -218,7 +218,7 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
         while (s_idx < content.len) {
             const slice = content[s_idx..];
             const match_offset = if (case_insensitive)
-                std.ascii.indexOfIgnoreCase(slice, search_term)
+                std.ascii.findIgnoreCase(slice, search_term)
             else
                 std.mem.indexOf(u8, slice, search_term);
 
@@ -287,8 +287,8 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
     var displayed_screen: Screen = .history;
 
     const style_dim: vaxis.Style = .{ .dim = true };
-    const style_sep: vaxis.Style = .{ .fg = .{ .index = @intFromEnum(Colors.gray) }, .dim = true };
-    const style_dur: vaxis.Style = .{ .fg = .{ .index = @intFromEnum(Colors.blue) } };
+    const style_sep: vaxis.Style = .{ .fg = .{ .index = @backingInt(Colors.gray) }, .dim = true };
+    const style_dur: vaxis.Style = .{ .fg = .{ .index = @backingInt(Colors.blue) } };
 
     while (true) {
         _ = arena.reset(.retain_capacity);
@@ -372,7 +372,7 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
 
                 const current_item_idx = scroll_offset + i;
                 const is_selected = (current_item_idx == selected_idx);
-                const sel_bg: vaxis.Color = if (is_selected) .{ .index = @intFromEnum(Colors.gray) } else .default;
+                const sel_bg: vaxis.Color = if (is_selected) .{ .index = @backingInt(Colors.gray) } else .default;
 
                 const ago_str = try formatAgo(ctxi.io, aa, cmd.last_run_at);
                 const dur_str = try formatDuration(aa, cmd.last_duration_ms);
@@ -391,8 +391,8 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 base_dur.bg = sel_bg;
                 base_sep.bg = sel_bg;
 
-                const ago_text = try std.fmt.allocPrint(aa, "{s:>10} ", .{ago_str});
-                const dur_text = try std.fmt.allocPrint(aa, "{s:>8} ", .{dur_str});
+                const ago_text = try aa.print("{s:>10} ", .{ago_str});
+                const dur_text = try aa.print("{s:>8} ", .{dur_str});
 
                 const wrapped = try wrapCommand(aa, cmd.content, is_selected, cmd_max_width, actual_search, case_insensitive);
                 const lines_count = wrapped.len;
@@ -447,7 +447,7 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 const margin: u16 = 2;
 
                 _ = detail_win.print(&.{
-                    .{ .text = "COMMAND DETAILS ", .style = .{ .bold = true, .fg = .{ .index = @intFromEnum(Colors.green) } } },
+                    .{ .text = "COMMAND DETAILS ", .style = .{ .bold = true, .fg = .{ .index = @backingInt(Colors.green) } } },
                 }, .{ .row_offset = 0, .col_offset = 2 });
 
                 _ = detail_win.print(&.{.{ .text = "Command:", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
@@ -472,7 +472,7 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 const avg_dur_str = try formatDuration(aa, avg_dur);
 
                 const stats_values = [_][]const u8{
-                    try std.fmt.allocPrint(aa, "{d}", .{d.cmd.run_count}),
+                    try aa.print("{d}", .{d.cmd.run_count}),
                     total_dur_str,
                     avg_dur_str,
                     ago_str,
@@ -480,8 +480,8 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
 
                 for (stats_labels, stats_values) |label, val| {
                     _ = detail_win.print(&.{
-                        .{ .text = try std.fmt.allocPrint(aa, "  {s: <12} ", .{label}), .style = style_sep },
-                        .{ .text = val, .style = .{ .fg = .{ .index = @intFromEnum(Colors.cyan) } } },
+                        .{ .text = try aa.print("  {s: <12} ", .{label}), .style = style_sep },
+                        .{ .text = val, .style = .{ .fg = .{ .index = @backingInt(Colors.cyan) } } },
                     }, .{ .row_offset = row, .col_offset = margin });
                     row += 1;
                 }
@@ -494,9 +494,9 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                     const code_color: Colors = if (stat.exit_code == 0) .green else .yellow;
                     _ = detail_win.print(&.{
                         .{ .text = "  Code ", .style = style_sep },
-                        .{ .text = try std.fmt.allocPrint(aa, "{d: >3}", .{stat.exit_code}), .style = .{ .fg = .{ .index = @intFromEnum(code_color) } } },
+                        .{ .text = try aa.print("{d: >3}", .{stat.exit_code}), .style = .{ .fg = .{ .index = @backingInt(code_color) } } },
                         .{ .text = " : ", .style = style_sep },
-                        .{ .text = try std.fmt.allocPrint(aa, "{d}", .{stat.frequency}), .style = .{} },
+                        .{ .text = try aa.print("{d}", .{stat.frequency}), .style = .{} },
                     }, .{ .row_offset = row, .col_offset = margin });
                     row += 1;
                 }

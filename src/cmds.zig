@@ -157,7 +157,7 @@ pub fn searchCommands(ctxi: *ctx.Ctx, alloc: std.mem.Allocator, term: []const u8
                 \\ORDER BY last_run_at DESC
             );
             defer stmt.deinit();
-            const like_term = try std.fmt.allocPrint(alloc, "%{s}%", .{term});
+            const like_term = try alloc.print("%{s}%", .{term});
             defer alloc.free(like_term);
             return try stmt.all(Cmd, alloc, .{}, .{like_term});
         } else {
@@ -173,7 +173,7 @@ pub fn searchCommands(ctxi: *ctx.Ctx, alloc: std.mem.Allocator, term: []const u8
     }
 
     const pattern = if (case_sensitive)
-        try std.fmt.allocPrint(alloc, "(?i){s}", .{term})
+        try alloc.print("(?i){s}", .{term})
     else
         try alloc.dupe(u8, term);
     defer alloc.free(pattern);
@@ -226,7 +226,7 @@ pub fn getSuggestion(ctxi: *ctx.Ctx, pfx: []const u8) !?[]const u8 {
     const like_pfx = try std.fmt.allocPrint(ctxi.alloc, "{s}%", .{pfx});
     defer ctxi.alloc.free(like_pfx);
 
-    if (try stmt.oneAlloc(struct { content: []const u8}, ctxi.alloc, .{}, .{like_pfx})) |row| {
+    if (try stmt.oneAlloc(struct { content: []const u8 }, ctxi.alloc, .{}, .{like_pfx})) |row| {
         return row.content;
     }
     return null;
