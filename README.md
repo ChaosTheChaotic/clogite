@@ -37,10 +37,17 @@ programs.clogite = {
 ```
 
 ## Keybinds
-- ctrl+c or escape to quit when on the history page or go back to the history page when on the info page
-- ctrl+d to delete a command
-- ctrl+o to view more info about a command
-- enter to run the command
-- tab to place the command into the next shell prompt (for editing)
-- Prepend \c to use case sensitive search
-- Prepend \f to use plain text search
+- Main screen
+    - ctrl+c or escape to quit
+    - Up and down arrows to choose commands
+    - ctrl+d to delete a command
+    - ctrl+o to view more info about a command (details page)
+    - enter to run the command
+    - tab to place the command into the next shell prompt (for editing)
+    - Prepend \c to use case sensitive search
+    - Prepend \f to use plain text search
+- Details page
+    - ctrl+c or escape to go back to the main screen
+    - Left and right arrows to move cursor over different segments
+    - \[ and ] to set start and end respectively
+    - a to select all

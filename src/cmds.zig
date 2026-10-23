@@ -27,16 +27,141 @@ pub const CmdDetail = struct {
     }
 };
 
+pub const SegStat = struct {
+    cmd_smry: Cmd,
+    exit_codes: []ExitCodeStat,
+    match_count: usize,
+
+    pub fn deinit(self: SegStat, alloc: std.mem.Allocator) void {
+        alloc.free(self.exit_codes);
+    }
+};
+
+pub const TokenRange = struct {
+    start: usize,
+    end: usize,
+};
+
+pub const ShellTokenIterator = struct {
+    content: []const u8,
+    index: usize = 0,
+
+    pub fn init(content: []const u8) ShellTokenIterator {
+        return .{ .content = content };
+    }
+
+    pub fn next(self: *ShellTokenIterator) ?TokenRange {
+        const len = self.content.len;
+        while (self.index < len and std.ascii.isWhitespace(self.content[self.index])) {
+            self.index += 1;
+        }
+        if (self.index >= len) return null;
+
+        const start = self.index;
+        var in_single_quote = false;
+        var in_double_quote = false;
+        var paren_depth: i32 = 0;
+        var brace_depth: i32 = 0;
+        var bracket_depth: i32 = 0;
+        var escaped = false;
+
+        const c_start = self.content[self.index];
+        if (!escaped and !in_single_quote and !in_double_quote and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) {
+            if (c_start == '|' or c_start == '&' or c_start == ';') {
+                self.index += 1;
+                if (self.index < len and self.content[self.index] == c_start) {
+                    self.index += 1;
+                }
+                return TokenRange{ .start = start, .end = self.index };
+            }
+        }
+
+        while (self.index < len) {
+            const c = self.content[self.index];
+
+            if (escaped) {
+                escaped = false;
+                self.index += 1;
+                continue;
+            }
+
+            if (c == '\\') {
+                escaped = true;
+                self.index += 1;
+                continue;
+            }
+
+            if (in_single_quote) {
+                if (c == '\'') {
+                    in_single_quote = false;
+                }
+                self.index += 1;
+                continue;
+            }
+
+            if (in_double_quote) {
+                if (c == '"') {
+                    in_double_quote = false;
+                }
+                self.index += 1;
+                continue;
+            }
+
+            // Outside quotes
+            if (c == '\'') {
+                in_single_quote = true;
+                self.index += 1;
+            } else if (c == '"') {
+                in_double_quote = true;
+                self.index += 1;
+            } else if (c == '(') {
+                paren_depth += 1;
+                self.index += 1;
+            } else if (c == ')') {
+                if (paren_depth > 0) paren_depth -= 1;
+                self.index += 1;
+            } else if (c == '{') {
+                brace_depth += 1;
+                self.index += 1;
+            } else if (c == '}') {
+                if (brace_depth > 0) brace_depth -= 1;
+                self.index += 1;
+            } else if (c == '[') {
+                bracket_depth += 1;
+                self.index += 1;
+            } else if (c == ']') {
+                if (bracket_depth > 0) bracket_depth -= 1;
+                self.index += 1;
+            } else if (std.ascii.isWhitespace(c) and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) {
+                break;
+            } else if ((c == '|' or c == '&' or c == ';') and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) {
+                if (self.index == start) {
+                    self.index += 1;
+                    if (self.index < len and self.content[self.index] == c) {
+                        self.index += 1;
+                    }
+                }
+                break;
+            } else {
+                self.index += 1;
+            }
+        }
+
+        if (self.index == start) return null;
+        return TokenRange{ .start = start, .end = self.index };
+    }
+};
+
 // Makes commands that are identically parsed be the same
 fn normalizeCommand(alloc: std.mem.Allocator, raw_cmd: []const u8) ![]const u8 {
-    var tokens = std.mem.tokenizeAny(u8, raw_cmd, " \t\n\r");
+    var it = ShellTokenIterator.init(raw_cmd);
     var list: std.ArrayList(u8) = .empty;
     errdefer list.deinit(alloc);
 
     var first = true;
-    while (tokens.next()) |token| {
+    while (it.next()) |tr| {
         if (!first) try list.append(alloc, ' ');
-        try list.appendSlice(alloc, token);
+        try list.appendSlice(alloc, raw_cmd[tr.start..tr.end]);
         first = false;
     }
     return list.toOwnedSlice(alloc);
@@ -223,11 +348,80 @@ pub fn getSuggestion(ctxi: *ctx.Ctx, pfx: []const u8) !?[]const u8 {
     );
     defer stmt.deinit();
 
-    const like_pfx = try std.fmt.allocPrint(ctxi.alloc, "{s}%", .{pfx});
+    const like_pfx = try ctxi.alloc.print("{s}%", .{pfx});
     defer ctxi.alloc.free(like_pfx);
 
     if (try stmt.oneAlloc(struct { content: []const u8 }, ctxi.alloc, .{}, .{like_pfx})) |row| {
         return row.content;
     }
     return null;
+}
+
+pub fn tokenizeCmd(alloc: std.mem.Allocator, content: []const u8) ![][]const u8 {
+    var tkns: std.ArrayList([]const u8) = .empty;
+
+    var it = ShellTokenIterator.init(content);
+    while (it.next()) |tr| {
+        try tkns.append(alloc, content[tr.start..tr.end]);
+    }
+
+    return tkns.toOwnedSlice(alloc);
+}
+
+pub fn getSegCmdInfo(alloc: std.mem.Allocator, ctxi: *ctx.Ctx, seg: []const u8) !?SegStat {
+    var db = ctxi.db orelse return error.DatabaseNotInitialized;
+
+    const ptrn = try alloc.print("%{s}%", .{seg});
+    defer alloc.free(ptrn);
+
+    var stmt = try db.prepare(
+        \\SELECT
+        \\  SUM(run_count),
+        \\  SUM(total_duration_ms),
+        \\  MAX(last_run_at),
+        \\  COUNT(*)
+        \\FROM commands
+        \\WHERE content LIKE ? OR content = ?
+    );
+    defer stmt.deinit();
+
+    const row = (try stmt.oneAlloc(struct {
+        sum_runs: ?i64,
+        sum_duration_ms: ?i64,
+        max_last_run: ?i64,
+        match_count: ?i64,
+    }, alloc, .{}, .{ ptrn, seg })) orelse return null;
+    const run_count = row.sum_runs orelse 0;
+    if (run_count == 0) return null;
+
+    const total_dur = row.sum_duration_ms orelse 0;
+    const match_count = @as(usize, @intCast(row.match_count orelse 0));
+
+    var exit_stmt = try db.prepare(
+        \\SELECT e.exit_code, SUM(e.frequency) as total_freq
+        \\FROM exit_code_stats e
+        \\JOIN commands c ON e.command_id = c.id
+        \\WHERE c.content LIKE ? OR c.content = ?
+        \\GROUP BY e.exit_code
+        \\ORDER BY total_freq DESC
+    );
+    defer exit_stmt.deinit();
+
+    const exit_codes = try exit_stmt.all(ExitCodeStat, alloc, .{}, .{ ptrn, seg });
+
+    const smry_cmd = Cmd{
+        .id = 0,
+        .content = seg,
+        .last_run_at = row.max_last_run orelse 0,
+        .last_exit_code = 0,
+        .last_duration_ms = if (run_count > 0) @divTrunc(total_dur, run_count) else 0,
+        .run_count = run_count,
+        .total_duration_ms = total_dur,
+    };
+
+    return SegStat{
+        .cmd_smry = smry_cmd,
+        .exit_codes = exit_codes,
+        .match_count = match_count,
+    };
 }

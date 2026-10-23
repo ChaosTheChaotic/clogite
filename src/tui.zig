@@ -141,100 +141,111 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
     defer alloc.free(styles);
     @memset(styles, .{ .bg = sel_bg });
 
-    var i: usize = 0;
+    var token_it = cmds.ShellTokenIterator.init(content);
     var is_first_token = true;
 
-    while (i < content.len) {
-        while (i < content.len and std.ascii.isWhitespace(content[i])) : (i += 1) {}
-        if (i >= content.len) break;
-
-        const start = i;
-        var len: usize = 0;
+    while (token_it.next()) |tr| {
+        const token_text = content[tr.start..tr.end];
         var style: vaxis.Style = .{ .bg = sel_bg };
 
-        if (content[i] == '-' and !is_first_token) {
+        if (is_first_token) {
+            style.fg = .{ .index = @backingInt(Colors.green) };
+            style.bold = true;
+        } else if (std.mem.startsWith(u8, token_text, "-")) {
             style.fg = .{ .index = @backingInt(Colors.cyan) };
-            while (i + len < content.len and !std.ascii.isWhitespace(content[i + len])) : (len += 1) {}
-        } else if (content[i] == '"' or content[i] == '\'') {
+        } else if ((std.mem.startsWith(u8, token_text, "'") and std.mem.endsWith(u8, token_text, "'")) or
+            (std.mem.startsWith(u8, token_text, "\"") and std.mem.endsWith(u8, token_text, "\"")))
+        {
             style.fg = .{ .index = @backingInt(Colors.yellow) };
-            const quote = content[i];
-            len = 1;
-            while (i + len < content.len) : (len += 1) {
-                if (content[i + len] == '\\' and i + len + 1 < content.len) {
-                    len += 1; // Skip escaped char
-                } else if (content[i + len] == quote) {
-                    len += 1;
-                    break;
-                }
-            }
-        } else {
-            if (is_first_token) {
-                style.fg = .{ .index = @backingInt(Colors.green) };
-                style.bold = true;
-            }
-            while (i + len < content.len and !std.ascii.isWhitespace(content[i + len])) : (len += 1) {}
         }
 
-        for (styles[start .. start + len]) |*s| s.* = style;
-        i += len;
+        for (styles[tr.start..tr.end]) |*s| s.* = style;
         is_first_token = false;
     }
 
-    i = 0;
+    var i: usize = 0;
+    var in_single_quote = false;
+    var in_double_quote = false;
+    var escaped = false;
+
     while (i < content.len) {
-        var len: usize = 0;
-        if (content[i] == '\\') {
-            i += 2;
+        const c = content[i];
+
+        if (escaped) {
+            escaped = false;
+            i += 1;
             continue;
         }
 
-        if (std.mem.startsWith(u8, content[i..], "${")) {
-            var in_quote: ?u8 = null;
-            for (content[i..], 0..) |char, j| {
-                if (char == '\\' and j + 1 < content[i..].len) continue;
-                if (in_quote) |q| {
-                    if (char == q) in_quote = null;
-                } else if (char == '"' or char == '\'') {
-                    in_quote = char;
-                } else if (char == '}') {
-                    len = j + 1;
-                    break;
-                }
-            }
-        } else if (std.mem.startsWith(u8, content[i..], "$(") or std.mem.startsWith(u8, content[i..], "<(")) {
-            var depth: usize = 0;
-            var in_quote: ?u8 = null;
-            for (content[i..], 0..) |char, j| {
-                if (char == '\\' and j + 1 < content[i..].len) continue;
-                if (in_quote) |q| {
-                    if (char == q) in_quote = null;
-                } else if (char == '"' or char == '\'') {
-                    in_quote = char;
-                } else if (char == '(') {
-                    depth += 1;
-                } else if (char == ')') {
-                    depth -= 1;
-                    if (depth == 0) {
-                        len = j + 1;
+        if (c == '\\') {
+            escaped = true;
+            i += 1;
+            continue;
+        }
+
+        if (!in_double_quote and c == '\'') {
+            in_single_quote = !in_single_quote;
+            i += 1;
+            continue;
+        }
+
+        if (!in_single_quote and c == '"') {
+            in_double_quote = !in_double_quote;
+            i += 1;
+            continue;
+        }
+
+        // Variables should not expand inside single quotes
+        if (!in_single_quote) {
+            var var_len: usize = 0;
+
+            if (std.mem.startsWith(u8, content[i..], "${")) {
+                for (content[i..], 0..) |char, j| {
+                    if (char == '\\' and j + 1 < content[i..].len) continue;
+                    if (char == '}') {
+                        var_len = j + 1;
                         break;
                     }
                 }
+            } else if (std.mem.startsWith(u8, content[i..], "$(") or std.mem.startsWith(u8, content[i..], "<(")) {
+                var depth: usize = 0;
+                var in_q: ?u8 = null;
+                for (content[i..], 0..) |char, j| {
+                    if (char == '\\' and j + 1 < content[i..].len) continue;
+                    if (in_q) |q| {
+                        if (char == q) in_q = null;
+                    } else if (char == '"' or char == '\'') {
+                        in_q = char;
+                    } else if (char == '(') {
+                        depth += 1;
+                    } else if (char == ')') {
+                        depth -= 1;
+                        if (depth == 0) {
+                            var_len = j + 1;
+                            break;
+                        }
+                    }
+                }
+            } else if (c == '$') {
+                var_len = 1;
+                while (i + var_len < content.len) : (var_len += 1) {
+                    const next_c = content[i + var_len];
+                    if (!std.ascii.isAlphanumeric(next_c) and next_c != '_' and next_c != '?' and next_c != '!' and next_c != '*' and next_c != '@' and next_c != '#') break;
+                }
             }
-        } else if (content[i] == '$') {
-            len = 1;
-            while (i + len < content.len) : (len += 1) {
-                const c = content[i + len];
-                if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '?' and c != '!' and c != '*' and c != '@' and c != '#') break;
+
+            if (var_len > 0) {
+                for (styles[i .. i + var_len]) |*s| {
+                    s.fg = .{ .index = @backingInt(Colors.magenta) };
+                }
+                i += var_len;
+                continue;
             }
         }
 
-        if (len > 0) {
-            for (styles[i .. i + len]) |*s| s.fg = .{ .index = @backingInt(Colors.magenta) };
-            i += len;
-        } else {
-            i += 1;
-        }
+        i += 1;
     }
+
     if (search_info) |info| {
         if (info.term.len > 0) {
             var matches_ptr: *Match = undefined;
@@ -339,6 +350,10 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
     var selected_idx: i64 = 0;
     var scroll_offset: usize = 0;
     var displayed_screen: Screen = .history;
+
+    var token_cursor: usize = 0;
+    var sel_start: usize = 0;
+    var sel_end: usize = 0;
 
     const style_dim: vaxis.Style = .{ .dim = true };
     const style_sep: vaxis.Style = .{ .fg = .{ .index = @backingInt(Colors.gray) }, .dim = true };
@@ -480,37 +495,65 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
             });
 
             const current_cmd = history[@intCast(selected_idx)].content;
-            if (try cmds.getCommandInfo(aa, ctxi, current_cmd)) |d| {
+            const tokens = try cmds.tokenizeCmd(aa, current_cmd);
+            if (token_cursor >= tokens.len) {
+                token_cursor = if (tokens.len > 0) tokens.len - 1 else 0;
+            }
+            if (sel_end >= tokens.len) {
+                sel_end = if (tokens.len > 0) tokens.len - 1 else 0;
+            }
+            if (sel_start > sel_end) {
+                sel_start = sel_end;
+            }
+
+            var seg_buf: std.ArrayList(u8) = .empty;
+            for (tokens[sel_start .. sel_end + 1], 0..) |t, idx| {
+                if (idx > 0) try seg_buf.append(aa, ' ');
+                try seg_buf.appendSlice(aa, t);
+            }
+            const segment_str = try seg_buf.toOwnedSlice(aa);
+
+            if (try cmds.getSegCmdInfo(aa, ctxi, segment_str)) |d| {
                 var row: u16 = 1;
                 const margin: u16 = 2;
 
                 _ = detail_win.print(&.{
-                    .{ .text = "COMMAND DETAILS ", .style = .{ .bold = true, .fg = .{ .index = @backingInt(Colors.green) } } },
+                    .{ .text = "COMMAND STATISTICS ", .style = .{ .bold = true, .fg = .{ .index = @backingInt(Colors.green) } } },
                 }, .{ .row_offset = 0, .col_offset = 2 });
 
-                _ = detail_win.print(&.{.{ .text = "Command:", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
-                row += 1;
-
-                const cmd_wrapped = try wrapCommand(aa, d.cmd.content, false, detail_win.width - (margin * 2), SearchInfo{ .term = "", .case = false, .regex = false });
-                for (cmd_wrapped) |line| {
-                    _ = detail_win.print(line, .{ .row_offset = row, .col_offset = margin + 1 });
-                    row += 1;
+                var token_segs: std.ArrayList(vaxis.Cell.Segment) = .empty;
+                for (tokens, 0..) |token, idx| {
+                    if (idx > 0) {
+                        try token_segs.append(aa, .{ .text = " ", .style = .{} });
+                    }
+                    var style: vaxis.Style = .{};
+                    if (idx >= sel_start and idx <= sel_end) {
+                        style.bg = .{ .index = @backingInt(Colors.blue) };
+                        style.fg = .{ .index = 0 };
+                    }
+                    if (idx == token_cursor) {
+                        style.ul_style = .single;
+                        style.bold = true;
+                    }
+                    try token_segs.append(aa, .{ .text = token, .style = style });
                 }
-                row += 1;
+                _ = detail_win.print(token_segs.items, .{ .row_offset = row, .col_offset = margin + 1 });
+                row += 2;
 
                 _ = detail_win.print(&.{.{ .text = "Statistics:", .style = style_dim }}, .{ .row_offset = row, .col_offset = margin });
                 row += 1;
 
-                const stats_labels = [_][]const u8{ "Run Count", "Total Time", "Avg Time", "Last Run" };
+                const stats_labels = [_][]const u8{ "Matching Cmds", "Run Count", "Total Time", "Avg Time", "Last Run" };
 
-                const avg_dur = if (d.cmd.run_count > 0) @divTrunc(d.cmd.total_duration_ms, d.cmd.run_count) else 0;
+                const avg_dur = if (d.cmd_smry.run_count > 0) @divTrunc(d.cmd_smry.total_duration_ms, d.cmd_smry.run_count) else 0;
 
-                const ago_str = try formatAgo(ctxi.io, aa, d.cmd.last_run_at);
-                const total_dur_str = try formatDuration(aa, d.cmd.total_duration_ms);
+                const ago_str = try formatAgo(ctxi.io, aa, d.cmd_smry.last_run_at);
+                const total_dur_str = try formatDuration(aa, d.cmd_smry.total_duration_ms);
                 const avg_dur_str = try formatDuration(aa, avg_dur);
 
                 const stats_values = [_][]const u8{
-                    try aa.print("{d}", .{d.cmd.run_count}),
+                    try aa.print("{d}", .{d.match_count}),
+                    try aa.print("{d}", .{d.cmd_smry.run_count}),
                     total_dur_str,
                     avg_dur_str,
                     ago_str,
@@ -518,7 +561,7 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
 
                 for (stats_labels, stats_values) |label, val| {
                     _ = detail_win.print(&.{
-                        .{ .text = try aa.print("  {s: <12} ", .{label}), .style = style_sep },
+                        .{ .text = try aa.print("  {s: <14} ", .{label}), .style = style_sep },
                         .{ .text = val, .style = .{ .fg = .{ .index = @backingInt(Colors.cyan) } } },
                     }, .{ .row_offset = row, .col_offset = margin });
                     row += 1;
@@ -562,6 +605,29 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                     try cmds.removeCommand(ctxi, history[@intCast(selected_idx)].content);
                 } else if (key.matches('o', .{ .ctrl = true })) {
                     displayed_screen = .info;
+                    token_cursor = 0;
+                    sel_start = 0;
+                    const current_cmd = history[@intCast(selected_idx)].content;
+                    const init_tokens = try cmds.tokenizeCmd(aa, current_cmd);
+                    sel_end = if (init_tokens.len > 0) init_tokens.len - 1 else 0;
+                } else if (displayed_screen == .info) {
+                    const current_cmd = history[@intCast(selected_idx)].content;
+                    const tokens = try cmds.tokenizeCmd(aa, current_cmd);
+
+                    if (key.matches(vaxis.Key.left, .{}) or key.matches('h', .{})) {
+                        if (token_cursor > 0) token_cursor -= 1;
+                    } else if (key.matches(vaxis.Key.right, .{}) or key.matches('l', .{})) {
+                        if (token_cursor + 1 < tokens.len) token_cursor += 1;
+                    } else if (key.matches('[', .{})) {
+                        sel_start = token_cursor;
+                        if (sel_start > sel_end) sel_end = sel_start;
+                    } else if (key.matches(']', .{})) {
+                        sel_end = token_cursor;
+                        if (sel_end < sel_start) sel_start = sel_end;
+                    } else if (key.matches('a', .{})) {
+                        sel_start = 0;
+                        sel_end = if (tokens.len > 0) tokens.len - 1 else 0;
+                    }
                 } else if (displayed_screen == .history) {
                     try text_input.update(.{ .key_press = key });
                     selected_idx = 0;
