@@ -30,6 +30,22 @@ const SearchInfo = struct {
     case: bool,
 };
 
+const Match = extern struct {
+    start: usize,
+    end: usize,
+};
+
+extern fn regex_find_all_ffi(
+    pattern: [*]const u8,
+    pattern_len: usize,
+    text: [*]const u8,
+    text_len: usize,
+    matches_out: **Match,
+    len_out: *usize,
+) callconv(.c) bool;
+
+extern fn regex_free_matches(matches: [*]Match, len: usize) callconv(.c) void;
+
 fn formatAgo(io: std.Io, alloc: std.mem.Allocator, timestamp: i64) ![]const u8 {
     const diff = std.Io.Clock.real.now(io).toSeconds() - timestamp;
     if (diff < 60)
@@ -221,22 +237,29 @@ fn highlightZsh(alloc: std.mem.Allocator, content: []const u8, is_selected: bool
     }
     if (search_info) |info| {
         if (info.term.len > 0) {
-            if (info.regex == false) {
-                var s_idx: usize = 0;
-                while (s_idx < content.len) {
-                    const slice = content[s_idx..];
-                    const match_offset = if (info.case)
-                        std.ascii.findIgnoreCase(slice, info.term)
-                    else
-                        std.mem.indexOf(u8, slice, info.term);
+            var matches_ptr: *Match = undefined;
+            var len: usize = 0;
 
-                    if (match_offset) |offset| {
-                        const idx = s_idx + offset;
-                        for (styles[idx .. idx + info.term.len]) |*s| s.reverse = true;
-                        s_idx = idx + info.term.len;
-                    } else break;
+            const ok = regex_find_all_ffi(
+                info.term.ptr,
+                info.term.len,
+                content.ptr,
+                content.len,
+                &matches_ptr,
+                &len,
+            );
+
+            if (ok and len > 0) {
+                const matches_many: [*]Match = @ptrCast(matches_ptr);
+                defer regex_free_matches(matches_many, len);
+
+                const matches = matches_many[0..len];
+                for (matches) |m| {
+                    if (m.end <= content.len) {
+                        for (styles[m.start..m.end]) |*s| s.reverse = true;
+                    }
                 }
-            } else {}
+            }
         }
     }
 

@@ -26,9 +26,10 @@ pub fn build(b: *std.Build) !void {
     opts.addOption(std.SemanticVersion, "program_version", std.SemanticVersion.parse("0.0.0") catch unreachable);
 
     const skip_rust = b.option(bool, "skip-rust", "Skip compiling the Rust bundle (provided externally)") orelse false;
-    const bundle_lib_path = b.option([]const u8, "bundle-lib-path", "Path to the pre-compiled bundle directory");
+    const bundle_sqlite_lib_path = b.option([]const u8, "bundle-lib-path", "Path to the pre-compiled bundle directory");
+    const regex_lib_path = b.option([]const u8, "regex-lib-path", "Path to the pre-compiled bundle directory");
 
-    if (skip_rust and bundle_lib_path == null) {
+    if (skip_rust and (bundle_sqlite_lib_path == null or regex_lib_path == null)) {
         std.debug.print("Cannot skip rust withiout providing the bundle lib path for linking", .{});
         std.process.exit(1);
     }
@@ -109,9 +110,9 @@ pub fn build(b: *std.Build) !void {
     if (!skip_rust) {
         const vendor_urls = [_][]const u8{ "https://github.com/phiresky/sqlite-zstd.git", "https://github.com/asg017/sqlite-regex.git", "https://github.com/asg017/sqlite-loadable-rs" };
         const bundle_path = b.pathJoin(&.{ b.root.root_dir.path.?, "deps", "sqlite-bundle" });
-        const cargo_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", b.pathJoin(&.{ bundle_path, "Cargo.toml" }) });
-        cargo_build.has_side_effects = true;
-        cargo_build.setEnvironmentVariable("LIBSQLITE3_SYS_USE_PKG_CONFIG", "1");
+        const cargo_build_sqlite = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", b.pathJoin(&.{ bundle_path, "Cargo.toml" }) });
+        cargo_build_sqlite.has_side_effects = true;
+        cargo_build_sqlite.setEnvironmentVariable("LIBSQLITE3_SYS_USE_PKG_CONFIG", "1");
         for (vendor_urls) |url| {
             const last_slash = std.mem.lastIndexOfScalar(u8, url, '/') orelse 0;
             const start_idx = if (last_slash > 0) last_slash + 1 else 0;
@@ -147,38 +148,48 @@ pub fn build(b: *std.Build) !void {
                 const patch_bundle = b.addSystemCommand(&.{ "sed", "-i", "s/features = \\[\"functions\".*/features = [\"functions\", \"blob\", \"array\"]/", ctoml_path });
                 patch_bundle.step.dependOn(&download.step);
                 patch_bundle.has_side_effects = true;
-                cargo_build.step.dependOn(&patch_bundle.step);
+                cargo_build_sqlite.step.dependOn(&patch_bundle.step);
 
                 const patch_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info!/d", b.pathJoin(&.{ build_path, "src", "create_extension.rs" }) });
                 patch_log.step.dependOn(&download.step);
                 patch_log.has_side_effects = true;
-                cargo_build.step.dependOn(&patch_log.step);
-
+                cargo_build_sqlite.step.dependOn(&patch_log.step);
             } else if (std.mem.count(u8, url, "regex") > 0) {
                 const patch_loadable = b.addSystemCommand(&.{ "sed", "-i", "s|sqlite-loadable.*|sqlite-loadable = { path = \"../../vendor/sqlite-loadable-rs\"}|", ctoml_path });
                 patch_loadable.step.dependOn(&download.step);
                 patch_loadable.has_side_effects = true;
-                cargo_build.step.dependOn(&patch_loadable.step);
+                cargo_build_sqlite.step.dependOn(&patch_loadable.step);
 
                 const patch_tuple = b.addSystemCommand(&.{ "sed", "-i", "s/scalar_function_raw(\\([^)]*\\))\\([^.]\\)/scalar_function_raw(\\1).0\\2/g", b.pathJoin(&.{ build_path, "src", "captures.rs" }) });
                 patch_tuple.step.dependOn(&download.step);
                 patch_tuple.has_side_effects = true;
-                cargo_build.step.dependOn(&patch_tuple.step);
+                cargo_build_sqlite.step.dependOn(&patch_tuple.step);
             } else if (std.mem.count(u8, url, "sqlite-loadable") > 0) {
                 const patch_bundled = b.addSystemCommand(&.{ "sed", "-i", "s/bundled//g", ctoml_path });
                 patch_bundled.step.dependOn(&download.step);
                 patch_bundled.has_side_effects = true;
-                cargo_build.step.dependOn(&patch_bundled.step);
+                cargo_build_sqlite.step.dependOn(&patch_bundled.step);
             }
 
-            cargo_build.step.dependOn(&patch_rlib.step);
+            cargo_build_sqlite.step.dependOn(&patch_rlib.step);
         }
-        exe.step.dependOn(&cargo_build.step);
+        exe.step.dependOn(&cargo_build_sqlite.step);
         mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ bundle_path, "target", "release" }) });
+
+        const regex_hl_path = b.pathJoin(&.{ b.root.root_dir.path.?, "deps", "regex-hl" });
+        const cargo_build_regex = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", b.pathJoin(&.{ regex_hl_path, "Cargo.toml" }) });
+        cargo_build_regex.has_side_effects = true;
+
+        exe.root_module.addLibraryPath(.{
+            .cwd_relative = b.pathJoin(&.{ regex_hl_path, "target", "release" }),
+        });
+        exe.step.dependOn(&cargo_build_regex.step);
     } else {
-        mod.addLibraryPath(.{ .cwd_relative = bundle_lib_path.? });
+        mod.addLibraryPath(.{ .cwd_relative = bundle_sqlite_lib_path.? });
+        mod.addLibraryPath(.{ .cwd_relative = regex_lib_path.? });
     }
     mod.linkSystemLibrary("sqlite_bundle", .{ .preferred_link_mode = .static });
+    mod.linkSystemLibrary("regex_hl", .{ .preferred_link_mode = .static });
     mod.linkSystemLibrary("gcc_s", .{});
     if (target.result.os.tag != .windows) {
         mod.linkSystemLibrary("pthread", .{});

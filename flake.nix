@@ -119,9 +119,7 @@
 
             src = ./deps/sqlite-bundle;
 
-            cargoLock = {
-              lockFile = ./deps/sqlite-bundle/Cargo.lock;
-            };
+            cargoLock.lockFile = ./deps/sqlite-bundle/Cargo.lock;
 
             doCheck = false;
 
@@ -174,6 +172,21 @@
             '';
           };
 
+          regex-lib = pkgs.rustPlatform.buildRustPackage {
+            pname = "regex-hl";
+            version = "0.0.0";
+
+            src = ./deps/regex-hl;
+
+            cargoLock.lockFile = ./deps/regex-hl/Cargo.lock;
+
+            doCheck = false;
+
+            postInstall = ''
+              mkdir -p $out/lib
+              cp target/*/release/libregex_hl.a $out/lib/
+            '';
+          };
         in
         {
           default = pkgs.stdenv.mkDerivation {
@@ -186,6 +199,7 @@
             buildInputs = [
               pkgs.sqlite.dev
               sqlite-bundle
+							regex-lib
             ];
 
             preBuild = ''
@@ -198,6 +212,7 @@
               "${zig-deps}"
               "-Dskip-rust=true"
               "-Dbundle-lib-path=${sqlite-bundle}/lib"
+							"-Dregex-lib-path=${regex-lib}/lib"
             ];
           };
         }
