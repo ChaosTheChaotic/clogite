@@ -173,11 +173,18 @@ fn normalizeCommand(alloc: std.mem.Allocator, raw_cmd: []const u8) ![]const u8 {
     var list: std.ArrayList(u8) = .empty;
     errdefer list.deinit(alloc);
 
-    var first = true;
+    var prev_end: ?usize = null;
     while (it.next()) |tr| {
-        if (!first) try list.append(alloc, ' ');
+        if (prev_end) |pe| {
+            const gap = raw_cmd[pe..tr.start];
+            if (gap.len > 0) {
+                // A newline is a command separator (and ends comments), so keep it
+                const sep: u8 = if (std.mem.indexOfScalar(u8, gap, '\n') != null) '\n' else ' ';
+                try list.append(alloc, sep);
+            }
+        }
         try list.appendSlice(alloc, raw_cmd[tr.start..tr.end]);
-        first = false;
+        prev_end = tr.end;
     }
     return list.toOwnedSlice(alloc);
 }

@@ -506,12 +506,12 @@ pub fn initTui(ctxi: *ctx.Ctx) !?[]const u8 {
                 sel_start = sel_end;
             }
 
-            var seg_buf: std.ArrayList(u8) = .empty;
-            for (tokens[sel_start .. sel_end + 1], 0..) |t, idx| {
-                if (idx > 0) try seg_buf.append(aa, ' ');
-                try seg_buf.appendSlice(aa, t);
-            }
-            const segment_str = try seg_buf.toOwnedSlice(aa);
+            const first = tokens[sel_start];
+            const last = tokens[sel_end];
+            const base = @intFromPtr(current_cmd.ptr);
+            const s = @intFromPtr(first.ptr) - base;
+            const e = @intFromPtr(last.ptr) - base + last.len;
+            const segment_str = current_cmd[s..e];
 
             if (try cmds.getSegCmdInfo(aa, ctxi, segment_str)) |d| {
                 var row: u16 = 1;
