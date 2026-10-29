@@ -68,11 +68,16 @@ pub const ShellTokenIterator = struct {
         const c_start = self.content[self.index];
         if (!escaped and !in_single_quote and !in_double_quote and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) {
             if (c_start == '|' or c_start == '&' or c_start == ';') {
-                self.index += 1;
-                if (self.index < len and self.content[self.index] == c_start) {
+                const next_c: u8 = if (start + 1 < len) self.content[start + 1] else 0;
+                if (!(c_start == '&' and next_c == '>')) {
                     self.index += 1;
+                    if (self.index < len and
+                        (self.content[self.index] == c_start or (c_start == '|' and self.content[self.index] == '&')))
+                    {
+                        self.index += 1;
+                    }
+                    return TokenRange{ .start = start, .end = self.index };
                 }
-                return TokenRange{ .start = start, .end = self.index };
             }
         }
 
@@ -135,6 +140,16 @@ pub const ShellTokenIterator = struct {
             } else if (std.ascii.isWhitespace(c) and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) {
                 break;
             } else if ((c == '|' or c == '&' or c == ';') and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0) {
+                const prev: u8 = if (self.index > start) self.content[self.index - 1] else 0;
+                const nex: u8 = if (self.index + 1 < len) self.content[self.index + 1] else 0;
+                const in_redirect =
+                    (c == '&' and (prev == '>' or prev == '<' or (self.index == start and nex == '>'))) or
+                    (c == '|' and prev == '>');
+                if (in_redirect) {
+                    self.index += 1;
+                    continue;
+                }
+
                 if (self.index == start) {
                     self.index += 1;
                     if (self.index < len and self.content[self.index] == c) {
