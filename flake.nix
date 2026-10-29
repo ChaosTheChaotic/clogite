@@ -199,7 +199,7 @@
             buildInputs = [
               pkgs.sqlite.dev
               sqlite-bundle
-							regex-lib
+              regex-lib
             ];
 
             preBuild = ''
@@ -212,7 +212,7 @@
               "${zig-deps}"
               "-Dskip-rust=true"
               "-Dbundle-lib-path=${sqlite-bundle}/lib"
-							"-Dregex-lib-path=${regex-lib}/lib"
+              "-Dregex-lib-path=${regex-lib}/lib"
             ];
           };
         }

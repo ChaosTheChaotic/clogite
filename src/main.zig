@@ -9,6 +9,7 @@ const SubCmd = enum {
     view,
     init,
     suggest,
+    sql,
 
     pub fn parse(str: []const u8) ?SubCmd {
         if (std.mem.eql(u8, str, "rem")) {
@@ -220,6 +221,14 @@ pub fn main(init: std.process.Init) !void {
                 try stdout.interface.writeAll(suggestion);
                 try stdout.interface.flush();
             }
+        },
+        .sql => {
+            ctx.db = try clogite.db.initDb(ctx);
+            const query = args.next() orelse {
+                std.log.err("clogite sql requires a query", .{});
+                std.process.exit(22);
+            };
+            try clogite.cmds.runSql(&ctx, query, true);
         },
     }
 }

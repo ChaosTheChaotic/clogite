@@ -447,3 +447,56 @@ pub fn getSegCmdInfo(alloc: std.mem.Allocator, ctxi: *ctx.Ctx, seg: []const u8) 
         .match_count = match_count,
     };
 }
+
+const SqlOut = struct {
+    w: *std.Io.Writer,
+    show_header: bool,
+    header_done: bool = false,
+};
+
+fn sqlRowCb(
+    user: ?*anyopaque,
+    ncols: c_int,
+    vals: [*c][*c]u8,
+    names: [*c][*c]u8,
+) callconv(.c) c_int {
+    const st: *SqlOut = @ptrCast(@alignCast(user.?));
+    const n: usize = @intCast(ncols);
+
+    if (st.show_header and !st.header_done) {
+        st.header_done = true;
+        for (0..n) |i| {
+            if (i > 0) st.w.writeByte('\t') catch return 1;
+            st.w.writeAll(std.mem.span(names[i])) catch return 1;
+        }
+        st.w.writeByte('\n') catch return 1;
+    }
+    for (0..n) |i| {
+        if (i > 0) st.w.writeByte('\t') catch return 1;
+        if (vals[i] != null) {
+            st.w.writeAll(std.mem.span(vals[i])) catch return 1;
+        } else {
+            st.w.writeAll("NULL") catch return 1;
+        }
+    }
+    st.w.writeByte('\n') catch return 1;
+    return 0; // non zero aborts query
+}
+
+pub fn runSql(ctxi: *ctx.Ctx, sql: [:0]const u8, show_header: bool) !void {
+    const db = ctxi.db orelse return error.DatabaseNotInitialized;
+
+    var buf: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(ctxi.io, &buf);
+    var st = SqlOut{ .w = &stdout.interface, .show_header = show_header };
+
+    var err_msg: [*c]u8 = null;
+    const rc = sqlite.c.sqlite3_exec(db.db, sql.ptr, sqlRowCb, &st, &err_msg);
+    try stdout.interface.flush();
+
+    if (rc != sqlite.c.SQLITE_OK) {
+        defer sqlite.c.sqlite3_free(err_msg);
+        std.log.err("sql error ({d}): {s}", .{ rc, err_msg });
+        return error.SqlFailed;
+    }
+}
