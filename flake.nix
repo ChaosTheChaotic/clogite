@@ -3,10 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    sqlite-zstd = {
-      url = "github:phiresky/sqlite-zstd";
-      flake = false;
-    };
     sqlite-regex = {
       url = "github:asg017/sqlite-regex";
       flake = false;
@@ -21,7 +17,6 @@
     {
       self,
       nixpkgs,
-      sqlite-zstd,
       sqlite-regex,
       sqlite-loadable-rs,
     }:
@@ -119,7 +114,14 @@
 
             src = ./deps/sqlite-bundle;
 
-            cargoLock.lockFile = ./deps/sqlite-bundle/Cargo.lock;
+            cargoLock = {
+              lockFile = ./deps/sqlite-bundle/Cargo.lock;
+              outputHashes = {
+                "sqlite-zstd-0.3.5" = "sha256-bkab4BmxAe4P4bpRofZCA53FtoQfZkqe5YsQ3B/8Sng=";
+              };
+            };
+
+            dontCargoUseSystemLibs = true;
 
             doCheck = false;
 
@@ -138,7 +140,6 @@
 
             prePatch = ''
               mkdir -p vendor
-              cp -r ${sqlite-zstd} vendor/sqlite-zstd
               cp -r ${sqlite-regex} vendor/sqlite-regex
               cp -r ${sqlite-loadable-rs} vendor/sqlite-loadable-rs
               chmod -R +w vendor/
@@ -153,10 +154,6 @@
                            std::env::var("GIT_HASH").unwrap_or_else(|_| "unknown".to_string()));
               }
               EOF
-
-              sed -i 's/crate-type.*/crate-type = ["rlib"]/' vendor/sqlite-zstd/Cargo.toml
-              sed -i 's/features = \["functions".*/features = ["functions", "blob", "array"]/' vendor/sqlite-zstd/Cargo.toml
-              sed -i '/log::info!/d' vendor/sqlite-zstd/src/create_extension.rs
 
               sed -i 's/crate-type.*/crate-type = ["rlib"]/' vendor/sqlite-regex/Cargo.toml
               sed -i 's|sqlite-loadable.*|sqlite-loadable = { path = "../../vendor/sqlite-loadable-rs"}|' vendor/sqlite-regex/Cargo.toml

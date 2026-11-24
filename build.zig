@@ -108,7 +108,7 @@ pub fn build(b: *std.Build) !void {
     exe.lto = .full;
 
     if (!skip_rust) {
-        const vendor_urls = [_][]const u8{ "https://github.com/phiresky/sqlite-zstd.git", "https://github.com/asg017/sqlite-regex.git", "https://github.com/asg017/sqlite-loadable-rs" };
+        const vendor_urls = [_][]const u8{ "https://github.com/asg017/sqlite-regex.git", "https://github.com/asg017/sqlite-loadable-rs" };
         const bundle_path = b.pathJoin(&.{ b.root.root_dir.path.?, "deps", "sqlite-bundle" });
         const cargo_build_sqlite = b.addSystemCommand(&.{ "cargo", "build", "--release", "--manifest-path", b.pathJoin(&.{ bundle_path, "Cargo.toml" }) });
         cargo_build_sqlite.has_side_effects = true;
@@ -144,17 +144,7 @@ pub fn build(b: *std.Build) !void {
             patch_rlib.step.dependOn(&download.step);
             patch_rlib.has_side_effects = true;
 
-            if (std.mem.count(u8, url, "zstd") > 0) {
-                const patch_bundle = b.addSystemCommand(&.{ "sed", "-i", "s/features = \\[\"functions\".*/features = [\"functions\", \"blob\", \"array\"]/", ctoml_path });
-                patch_bundle.step.dependOn(&download.step);
-                patch_bundle.has_side_effects = true;
-                cargo_build_sqlite.step.dependOn(&patch_bundle.step);
-
-                const patch_log = b.addSystemCommand(&.{ "sed", "-i", "/log::info!/d", b.pathJoin(&.{ build_path, "src", "create_extension.rs" }) });
-                patch_log.step.dependOn(&download.step);
-                patch_log.has_side_effects = true;
-                cargo_build_sqlite.step.dependOn(&patch_log.step);
-            } else if (std.mem.count(u8, url, "regex") > 0) {
+            if (std.mem.count(u8, url, "regex") > 0) {
                 const patch_loadable = b.addSystemCommand(&.{ "sed", "-i", "s|sqlite-loadable.*|sqlite-loadable = { path = \"../../vendor/sqlite-loadable-rs\"}|", ctoml_path });
                 patch_loadable.step.dependOn(&download.step);
                 patch_loadable.has_side_effects = true;

@@ -7,6 +7,6 @@ edition = "2024"
 crate-type = ["staticlib"]
 
 [dependencies]
-sqlite-zstd = { path = "../../vendor/sqlite-zstd", package = "sqlite-zstd", features = ["build_extension"] }
+sqlite-zstd = { git = "https://github.com/ChaosTheChaotic/sqlite-zstd", default-features = false, features = ["build_extension"] }
 sqlite-regex = { path = "../../vendor/sqlite-regex" }
-zstd-sys = "=2.0.9"
+zstd-sys = "2.2.0"
