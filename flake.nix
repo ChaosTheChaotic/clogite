@@ -117,7 +117,7 @@
             cargoLock = {
               lockFile = ./deps/sqlite-bundle/Cargo.lock;
               outputHashes = {
-                "sqlite-zstd-0.3.5" = "sha256-bkab4BmxAe4P4bpRofZCA53FtoQfZkqe5YsQ3B/8Sng=";
+                "sqlite-zstd-0.3.5" = "sha256-NtT06WsD2q5H2LF5cSX50lm5lwv93n+vWbEIBOna/3Q=";
               };
             };
 
